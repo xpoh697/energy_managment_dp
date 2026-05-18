@@ -4761,6 +4761,19 @@ class EnergyDPAdviceSensor(SensorEntity):
             "prices_sell": self.planner._get_prices("prices_sell")
         }
         
+        # v12.8.0: Log effective horizon info so user knows what DP is working with
+        pb = snapshot["prices_buy"]
+        n_points = len(pb)
+        has_tomorrow = any(int(h) >= 24 for h in pb.keys()) if pb else False
+        cur_h = datetime.now().hour
+        effective_horizon = (max(int(h) for h in pb.keys()) - cur_h + 1) if pb else 0
+        _LOGGER.info(
+            "[DP Trigger] SOC=%.1f%% | Ценовых точек=%d | Завтрашние цены: %s | Эффективный горизонт: ~%dч",
+            soc, n_points,
+            "ЕСТЬ" if has_tomorrow else "нет (только сегодня)",
+            max(0, effective_horizon)
+        )
+        
         self.hass.async_add_executor_job(self._update_advice_threaded, snapshot)
 
     async def _async_on_calc_complete(self):

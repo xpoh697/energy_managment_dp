@@ -94,6 +94,22 @@ class DPPlanner:
             max_abs_h = max(available_hours) if available_hours else cur_hour + 23
             horizon = min(48, max_abs_h - cur_hour + 1)
             
+            # v12.8.0: Diagnostic logging of effective planning horizon
+            has_tomorrow_prices = any(int(h) >= 24 for h in prices_buy.keys())
+            horizon_label = (
+                f"{horizon}h до {(cur_hour + horizon - 1) % 24:02d}:00 "
+                f"{'завтра' if (cur_hour + horizon - 1) >= 24 else 'сегодня'}"
+            )
+            tomorrow_label = "есть (завтра включен)" if has_tomorrow_prices else "НЕТ (только сегодня)"
+            _LOGGER.info(
+                "[DP] Горизонт: %s | Ценовых точек: %d | Цены на завтра: %s",
+                horizon_label, len(available_hours), tomorrow_label
+            )
+            self.manager.log_to_file(
+                f"DIAG [DP]: Горизонт={horizon}ч | max_abs_h={max_abs_h} | "
+                f"cur_hour={cur_hour} | Цен всего={len(available_hours)} | Завтра={tomorrow_label}"
+            )
+            
             # --- Configuration ---
             max_p_dis = float(normalize_float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)))
             max_p_chg = max_p_dis 
