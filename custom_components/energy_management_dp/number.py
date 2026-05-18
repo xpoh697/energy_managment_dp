@@ -6,7 +6,6 @@ from .const import (
     DOMAIN,
     CONF_BATTERY_MAX_POWER,
     CONF_MIN_SOC_BAT,
-    CONF_SOC_BUFFER,
     CONF_DP_MIN_SOC,
     CONF_DP_PRICE_SELL_LIMIT,
 )
@@ -18,7 +17,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
         EnergyProfileNumber(manager, CONF_BATTERY_MAX_POWER, "Макс. мощность АКБ (кВт)", UnitOfPower.KILO_WATT, 0.0, 100.0, 0.1, "mdi:flash", 5.0),
         EnergyProfileNumber(manager, CONF_MIN_SOC_BAT, "Аварийный резерв АКБ", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
-        EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Буфер SOC на утро (%)", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
         EnergyProfileNumber(manager, CONF_DP_MIN_SOC, "DP Минимальный SOC АКБ", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-alert", 15.0),
         EnergyProfileNumber(manager, CONF_DP_PRICE_SELL_LIMIT, "DP Лимит цены продажи (арбитраж)", None, -99.0, 999.0, 0.001, "mdi:currency-usd-off", 0.01),
     ]

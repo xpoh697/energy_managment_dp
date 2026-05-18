@@ -11,7 +11,6 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
     CONF_MIN_SOC_BAT,
-    CONF_SOC_BUFFER,
     CONF_ONLY_SOLAR,
     CONF_PRIORITY,
     INVERTER_MODES,
@@ -633,8 +632,8 @@ class StrategyEngine:
             base_night = float(man.get_expected_night("consumption_base", eff_period, day_idx, until_hour=sunrise_hour)) * occ_coeff
             expected_base_consumption = float(base_rem_today + base_night)
             
-            soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
-            survival_threshold = min_soc + soc_buffer
+            soc_buffer = 0.0
+            survival_threshold = min_soc
             
             sunrise_h = 8
             prof_gen = man.get_average_profile("generation", eff_period, day_idx)

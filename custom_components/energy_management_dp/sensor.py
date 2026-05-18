@@ -55,7 +55,6 @@ from .const import (
     CONF_ONLY_SOLAR,
     CONF_DYNAMIC_SOC_BUY,
     CONF_DYNAMIC_SOC_SELL,
-    CONF_SOC_BUFFER,
     VERSION
 )
 from .const import CONF_BATTERY_VOLTAGE

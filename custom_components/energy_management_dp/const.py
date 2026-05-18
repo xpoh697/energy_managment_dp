@@ -1,7 +1,7 @@
 DOMAIN = "energy_management_dp"
-VERSION = "v12.4.0"
+VERSION = "v12.5.0"
 
-VERSION_CODE = 1240
+VERSION_CODE = 1250
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
@@ -26,7 +26,6 @@ CONF_MIN_SOC_BAT = "min_soc_bat"
 CONF_DYNAMIC_SOC_BUY = "dynamic_soc_buy"
 CONF_DYNAMIC_SOC_SELL = "dynamic_soc_sell"
 CONF_DEDUCT_SETTINGS = "deduct_settings"
-CONF_SOC_BUFFER = "soc_buffer"
 CONF_BATTERY_DISCHARGE_ENABLED = "battery_discharge_enabled"
 
 CONF_USE_DP = "use_dp"
@@ -55,7 +54,6 @@ CONF_POWER_GEN_SENSORS = "power_gen_sensors"
 
 CONF_SALE_PV_NO_BAT_MAX_HOUR = "sale_pv_no_bat_max_hour"
 CONF_FORCE_MARKET_SELL = "force_market_sell"
-CONF_EMERGENCY_SOC_LIMIT = "emergency_soc_limit"
 CONF_ARBITRAGE_PROFIT_THRESHOLD = "arbitrage_profit_threshold"
 
 CONF_PRESENCE_SENSORS = "presence_sensors"

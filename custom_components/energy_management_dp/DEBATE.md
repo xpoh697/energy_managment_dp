@@ -1423,6 +1423,37 @@ soc = min(100, int(round((si * energy_step) / b_cap * 100.0)))
    - Во всех методах (`_openModal`, `_updateUI`, `_renderTimeline`, `extra_state_attributes`) заменяем условное переключение данных на прямое использование `attrs.hourly_data` (с корректным определением `displaySoc` на основе `hourData.soc_limit ?? hourData.soc`).
 4. Проверяем компиляцию, деплоим изменения на сервер Home Assistant с очисткой `__pycache__`.
 
+---
+
+## [2026-05-18 23:35] Задача: Удаление emergency_soc_limit и soc_buffer и использование DP Минимального SOC АКБ (dp_min_soc) в качестве единственного лимита
+
+### Archi
+Для упрощения архитектуры, исключения дублирования сущностей и реализации прямого управления лимитами:
+1. Полностью удаляем `CONF_EMERGENCY_SOC_LIMIT = "emergency_soc_limit"` и `CONF_SOC_BUFFER = "soc_buffer"` из `const.py`.
+2. В файле `number.py` убираем регистрацию числового сенсора ползунка `CONF_SOC_BUFFER` ("Буфер SOC на утро (%)").
+3. В `strategy_dp.py` вырезаем импорт константы `CONF_SOC_BUFFER`, удаляем локальную переменную `soc_buff` и изменяем формулу расчета `min_end_usable` на прямую зависимость от `min_soc` (загруженного из `CONF_DP_MIN_SOC` / "DP Минимальный SOC АКБ"):
+   ```python
+   min_end_usable = (min_soc / 100.0) * b_cap
+   ```
+4. В файле `strategy.py` вырезаем все упоминания `soc_buffer` и `survival_threshold`, переводя эвристические расчеты на прямую работу с `min_soc`.
+5. В переводах (`ru.json`, `en.json`, `strings.json`) удаляем соответствующие ключи для очистки интерфейса.
+
+### Skeptic
+Поддерживаю избавление от костылей в виде искусственных буферов в пользу единого прямого лимита DP, но требую учесть 3 ключевых аспекта надежности:
+1. **Безопасность Config Flow и Coordinator**: Переменные `CONF_EMERGENCY_SOC_LIMIT` и `CONF_SOC_BUFFER` могли быть сохранены в настройках конфигурации Home Assistant. Мы должны гарантировать, что при удалении констант в `config_flow.py` и `sensor.py` не произойдет падения при вызове `self.manager.get_setting()`. Для этого обращения должны корректно игнорировать старые опции без падения с `KeyError`.
+2. **Защита от нулевого SOC в DP**: Если пользователь выставит "DP Минимальный SOC АКБ" равным `0%`, расчет `min_end_usable` должен корректно отработать без деления на ноль или выхода индексов за пределы сетки. Нужно убедиться, что `min_end_idx` корректно ограничивается в пределах `[0, energy_steps]`.
+3. **Бамп мажорной версии до v12.5.0**: Так как мы удаляем целый физический объект (`number.energy_management_dp_soc_buffer`), это является серьезным ломающим изменением API. Мы обязаны повысить версию интеграции до `v12.5.0` (VERSION_CODE: `1250`), чтобы HA корректно обновил сущности платформы.
+
+### Заключение
+Консенсус достигнут:
+1. Бампаем версию до `v12.5.0` (`const.py`, `manifest.json`).
+2. В `const.py` удаляем `CONF_EMERGENCY_SOC_LIMIT` и `CONF_SOC_BUFFER`.
+3. В `number.py` удаляем регистрацию сущности `CONF_SOC_BUFFER`.
+4. В `strategy_dp.py` удаляем `CONF_SOC_BUFFER`, переводим расчет `min_end_usable` строго на `min_soc` (из `CONF_DP_MIN_SOC` с фолбэком на `CONF_MIN_SOC_BAT`). Ограничиваем `min_end_idx` в пределах `[0, energy_steps]`.
+5. В `strategy.py` очищаем все упоминания `soc_buffer` и `survival_threshold`, используя физический `min_soc`.
+6. Очищаем переводы (`ru.json`, `en.json`, `strings.json`) и настройки в `config_flow.py`.
+7. Проверяем компиляцию, деплоим на сервер и удаляем remote `__pycache__`.
+
 
 
 

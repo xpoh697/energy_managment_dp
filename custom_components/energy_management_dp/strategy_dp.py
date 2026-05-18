@@ -9,7 +9,6 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
     CONF_MIN_SOC_BAT,
-    CONF_SOC_BUFFER,
     CONF_AI_DISCHARGE_LIMIT,
     CONF_BOILER_ENABLE,
     CONF_BOILER_POWER,
@@ -112,11 +111,10 @@ class DPPlanner:
             
             cycle_cost = self._get_deg_cost(b_cap)
             min_soc = float(normalize_float(self.manager.get_setting(CONF_DP_MIN_SOC, self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))))
-            soc_buff = float(normalize_float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0)))
             eff = getattr(self.manager, "last_eff_coeff", 0.98)  # align with strategy_base.py hardcoded 0.98
             
             # Terminal SOC floor: minimum energy at end of horizon (matches floor_idx in forward induction)
-            min_end_usable = ((min_soc + soc_buff) / 100.0) * b_cap  # kWh, dynamic from CONF_MIN_SOC_BAT + CONF_SOC_BUFFER + battery capacity
+            min_end_usable = (min_soc / 100.0) * b_cap  # kWh, dynamic from CONF_DP_MIN_SOC + battery capacity
             
             # v11.9.48: Boiler logic completely removed from DP model.
             
@@ -358,6 +356,7 @@ class DPPlanner:
             
             best_val, best_si = neg_inf, curr_si
             min_end_idx = int(round(min_end_usable / energy_step))
+            min_end_idx = max(0, min(energy_steps, min_end_idx))
             
             for si in range(energy_steps + 1):
                 reserve_penalty = -20.0 if si < min_end_idx else 0.0

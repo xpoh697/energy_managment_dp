@@ -295,7 +295,6 @@
       "min_soc_buy": { "name": "Минимальный уровень SOC" },
       "sale_pv_no_bat_max_hour": { "name": "Макс. час для продажи только PV" },
       "arbitrage_profit_threshold": { "name": "Минимальная прибыль арбитража" },
-      "soc_buffer": { "name": "Буфер SOC на утро (%)" },
       "dp_min_soc": { "name": "DP Минимальный SOC АКБ" },
       "dp_price_sell_limit": { "name": "DP Лимит цены продажи (арбитраж)" }
     }

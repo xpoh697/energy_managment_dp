@@ -237,7 +237,6 @@
       "min_soc_buy": { "name": "Minimum SOC Level" },
       "sale_pv_no_bat_max_hour": { "name": "Max Hour for Sell PV Only" },
       "arbitrage_profit_threshold": { "name": "Arbitrage Profit Threshold" },
-      "soc_buffer": { "name": "Morning SOC Buffer (%)" },
       "dp_min_soc": { "name": "DP Minimum Battery SOC" },
       "dp_price_sell_limit": { "name": "DP Sell Price Limit (Arbitrage)" }
     }
