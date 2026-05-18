@@ -113,7 +113,7 @@ class DPPlanner:
             eff = getattr(self.manager, "last_eff_coeff", 0.98)  # align with strategy_base.py hardcoded 0.98
             
             # Terminal SOC floor: minimum energy at end of horizon (matches floor_idx in forward induction)
-            min_end_usable = (min_soc / 100.0) * b_cap  # kWh, dynamic from CONF_DP_MIN_SOC + battery capacity
+            min_end_usable = (min_soc / 100.0) * b_cap  # kWh, dynamic from CONF_DP_MIN_SOC and battery capacity
             
             # v11.9.48: Boiler logic completely removed from DP model.
             
@@ -233,7 +233,7 @@ class DPPlanner:
                 if nsi < 0 or nsi > energy_steps: return
                 
                 # v11.9.54: Progressive Global Floor Penalty
-                floor_idx = int(round((min_soc + soc_buff) / 100.0 * energy_steps))
+                floor_idx = int(round(min_soc / 100.0 * energy_steps))
                 if nsi < floor_idx:
                     # Penalize distance to floor to force maximum recovery speed
                     dist_kwh = (floor_idx - nsi) * energy_step
@@ -242,15 +242,23 @@ class DPPlanner:
                 if total_rev > full_dp[t_step + 1][nsi][0]:
                     full_dp[t_step + 1][nsi] = (total_rev, si_orig, act, amt)
 
-            # v11.9.41: Top-N Arbitrage Sorting PER DAY
+            # v12.1.27: Group top discharge hours strictly by calendar days (Today vs Tomorrow)
+            # This isolates today's peak evening hours from tomorrow's high prices.
             top_sell_set = set()
-            for day in range(horizon // 24 + 1):
-                d_start = cur_hour + day * 24
-                d_end = d_start + 24
-                d_prices = [(int(h_key), p) for h_key, p in prices_sell.items() if d_start <= int(h_key) < d_end and p > min_sell_p]
-                d_top = sorted(d_prices, key=lambda x: x[1], reverse=True)[:max_arb_h]
-                for h_abs, p in d_top: top_sell_set.add(h_abs)
-                        # --- Forward Induction (2D DP) ---
+            
+            # Today's remaining hours (cur_hour <= h < 24)
+            d_prices_today = [(int(h_key), p) for h_key, p in prices_sell.items() if cur_hour <= int(h_key) < 24 and p > min_sell_p]
+            d_top_today = sorted(d_prices_today, key=lambda x: x[1], reverse=True)[:max_arb_h]
+            for h_abs, p in d_top_today:
+                top_sell_set.add(h_abs)
+                
+            # Tomorrow's hours (24 <= h < 48)
+            d_prices_tomorrow = [(int(h_key), p) for h_key, p in prices_sell.items() if 24 <= int(h_key) < 48 and p > min_sell_p]
+            d_top_tomorrow = sorted(d_prices_tomorrow, key=lambda x: x[1], reverse=True)[:max_arb_h]
+            for h_abs, p in d_top_tomorrow:
+                top_sell_set.add(h_abs)
+
+            # --- Forward Induction (2D DP) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
@@ -276,7 +284,7 @@ class DPPlanner:
 
                 # v12.1.20: Check if a negative price or absolute cheapest grid-charge hour is ahead in 6 hours
                 cheap_ahead = False
-                if p_sell <= price_sell_limit:
+                if p_sell <= price_sell_only_pv:
                     for future_h in range(abs_h + 1, min(abs_h + 7, cur_hour + horizon)):
                         future_p_buy = float(normalize_float(prices_buy.get(str(future_h), 99.0)))
                         if future_p_buy <= 0.01 or future_p_buy <= (min_price_buy + 0.05):
@@ -290,7 +298,7 @@ class DPPlanner:
                     usable_energy = si * energy_step  # DC kWh stored in battery
                     # 1. ACT_IDLE: Baseline
                     # If cheap_ahead is True, the physical inverter is in no_pv_sale_no_bat, curtailing excess solar (reward = 0.0)
-                    idle_pv_reward = 0.0 if (p_sell <= price_sell_limit and cheap_ahead) else (p_sell * pv_surplus)
+                    idle_pv_reward = 0.0 if (p_sell <= price_sell_only_pv and cheap_ahead) else (p_sell * pv_surplus)
                     _update(si, ACT_IDLE, 0.0, h, si, cur_rev + idle_pv_reward - p_buy * pv_deficit + 1e-6)
                             
                     # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
@@ -308,7 +316,7 @@ class DPPlanner:
                     # 3. ACT_PV_CHARGE: Surplus PV (AC) to battery (DC)
                     # chg_ac = AC power from PV; chg_dc = DC actually stored (after inverter losses)
                     # If cheap_ahead is True and p_sell is below the limit, block charging from solar (no_pv_sale_no_bat)
-                    if pv_surplus > 0.01 and si < energy_steps and not (p_sell <= price_sell_limit and cheap_ahead):
+                    if pv_surplus > 0.01 and si < energy_steps and not (p_sell <= price_sell_only_pv and cheap_ahead):
                         max_storable_dc = (energy_steps - si) * energy_step
                         chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg * duration)
                         chg_dc = chg_ac * eff
@@ -376,8 +384,6 @@ class DPPlanner:
             
             results.reverse()
             
-
-
             for h_idx, act, amt, prev_si, si in results:
                 abs_h = cur_hour + h_idx
                 h_rel = abs_h % 24
@@ -464,10 +470,7 @@ class DPPlanner:
                 }
 
             # Debug Info
-
-            # Debug Info
             coeff = getattr(self.manager, "last_blended_coeff", 1.0)
-            total_gen_today_raw = sum(f_gen_full.get(str(h), 0.0) for h in range(0, 24)) / (coeff if coeff > 0 else 1.0)
             total_gen_today = sum(f_gen_full.get(str(h), 0.0) for h in range(0, 24))
             total_gen_today_rem = sum(f_gen_full.get(str(h), 0.0) for h in range(cur_hour, 24))
             total_gen_tomorrow = sum(f_gen_full.get(str(h), 0.0) for h in range(24, 48))
