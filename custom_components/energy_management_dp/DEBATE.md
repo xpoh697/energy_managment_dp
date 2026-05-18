@@ -1530,6 +1530,34 @@ soc = min(100, int(round((si * energy_step) / b_cap * 100.0)))
 5. Добавляем защиту `min_end_idx = max(0, min(energy_steps, min_end_idx))` для предотвращения `IndexError`.
 6. Проверяем компиляцию, деплоим на сервер и удаляем remote `__pycache__`.
 
+---
+
+## [2026-05-18 23:53] Задача: Заменить CONF_PRICE_SELL_LIMIT на CONF_DP_PRICE_SELL_LIMIT в strategy_dp.py
+
+### Archi
+Для расчета арбитражных лимитов и режима разряда батареи (`mode = "sale_pv_bat"`) в DP-планировщике логично использовать специализированный лимит цены продажи для DP — `CONF_DP_PRICE_SELL_LIMIT` вместо общего `CONF_PRICE_SELL_LIMIT`. Это позволит пользователю гибко разделять общую стратегию продаж от точного алгоритма DP.
+Предлагаю заменить:
+```python
+price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
+```
+на:
+```python
+price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_DP_PRICE_SELL_LIMIT, 5.0)))
+```
+
+### Skeptic
+Поддерживаю замену, но у меня есть 3 строгих требования:
+1. **Удаление неиспользуемого импорта**: После этой замены `CONF_PRICE_SELL_LIMIT` больше нигде не используется в `strategy_dp.py`. Его необходимо полностью убрать из блока импортов из `.const`, чтобы не оставлять «мертвый» код и избежать предупреждений статического анализа.
+2. **Проверка дублирования импорта**: `CONF_DP_PRICE_SELL_LIMIT` уже импортируется в `strategy_dp.py` на 30-й строке. Мы должны убедиться, что он импортируется ровно один раз.
+3. **Безопасность дефолтных значений**: При вызове `self.manager.get_setting(CONF_DP_PRICE_SELL_LIMIT, 5.0)` мы должны оставить дефолтное значение `5.0` в качестве безопасного ограничителя на случай сброса настроек.
+
+### Заключение
+Консенсус достигнут:
+1. В `strategy_dp.py` удаляем `CONF_PRICE_SELL_LIMIT` из секции импортов (строка 27).
+2. На строке 214 заменяем `CONF_PRICE_SELL_LIMIT` на `CONF_DP_PRICE_SELL_LIMIT`.
+3. Убеждаемся, что `CONF_DP_PRICE_SELL_LIMIT` импортируется на 30-й строке ровно один раз.
+4. Проверяем работоспособность кода компиляцией и деплоим изменения на remote сервер.
+
 
 
 
