@@ -13,7 +13,7 @@ from .const import DOMAIN, VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "binary_sensor", "number", "switch"]
+PLATFORMS = ["sensor", "binary_sensor", "number"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:

@@ -4,16 +4,8 @@ from homeassistant.const import UnitOfPower, PERCENTAGE
 
 from .const import (
     DOMAIN,
-    CONF_PRICE_BUY_LIMIT,
-    CONF_PRICE_SELL_LIMIT,
-    CONF_PRICE_STOP_SELL,
-    CONF_PRICE_SELL_ONLY_PV,
     CONF_BATTERY_MAX_POWER,
-    CONF_AI_CHARGE_LIMIT,
-    CONF_AI_DISCHARGE_LIMIT,
     CONF_MIN_SOC_BAT,
-    CONF_SALE_PV_NO_BAT_MAX_HOUR,
-    CONF_ARBITRAGE_PROFIT_THRESHOLD,
     CONF_SOC_BUFFER,
     CONF_DP_MIN_SOC,
     CONF_DP_PRICE_SELL_LIMIT,
@@ -24,17 +16,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     manager = hass.data[DOMAIN][entry.entry_id]
     
     entities = [
-        EnergyProfileNumber(manager, CONF_PRICE_BUY_LIMIT, "Лимит цены покупки", None, -99.0, 999.0, 0.001, "mdi:cash-minus", 99.0),
-        EnergyProfileNumber(manager, CONF_PRICE_SELL_LIMIT, "Лимит цены продажи", None, -99.0, 999.0, 0.001, "mdi:cash-plus", -99.0),
-        EnergyProfileNumber(manager, CONF_ARBITRAGE_PROFIT_THRESHOLD, "Минимальная прибыль арбитража", None, 0.0, 999.0, 0.05, "mdi:hand-coin", 0.1),
-        EnergyProfileNumber(manager, CONF_PRICE_STOP_SELL, "Порог остановки продажи", None, -99.0, 999.0, 0.001, "mdi:cash-remove", 0.0),
-        EnergyProfileNumber(manager, CONF_PRICE_SELL_ONLY_PV, "Лимит продажи только PV", None, -99.0, 999.0, 0.001, "mdi:weather-sunny", 1.5),
         EnergyProfileNumber(manager, CONF_BATTERY_MAX_POWER, "Макс. мощность АКБ (кВт)", UnitOfPower.KILO_WATT, 0.0, 100.0, 0.1, "mdi:flash", 5.0),
-        EnergyProfileNumber(manager, CONF_AI_CHARGE_LIMIT, "Лимит заряда (Max SOC)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
-        EnergyProfileNumber(manager, CONF_AI_DISCHARGE_LIMIT, "Лимит пользователя (Min SOC)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
         EnergyProfileNumber(manager, CONF_MIN_SOC_BAT, "Аварийный резерв АКБ", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
         EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Буфер SOC на утро (%)", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
-        EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Макс. час для продажи только PV", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
         EnergyProfileNumber(manager, CONF_DP_MIN_SOC, "DP Минимальный SOC АКБ", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-alert", 15.0),
         EnergyProfileNumber(manager, CONF_DP_PRICE_SELL_LIMIT, "DP Лимит цены продажи (арбитраж)", None, -99.0, 999.0, 0.001, "mdi:currency-usd-off", 0.01),
     ]
