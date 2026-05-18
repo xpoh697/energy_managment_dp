@@ -745,8 +745,7 @@ class StrategyEngine:
             
             cur_price_buy = None
             if not skip_strategy_check:
-                strategy_res = self.get_market_strategy("buy")
-                cur_price_buy = strategy_res.get("today_prices", {}).get(str(cur_hour))
+                cur_price_buy = man.get_price("buy", now.strftime("%Y-%m-%d"), cur_hour)
 
             reserved_by = []
             # Sort loads by Priority (lower value = higher priority)

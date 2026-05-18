@@ -110,11 +110,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(LiveHourlySensor(manager, "generation", "Текущая почасовая генерация"))
         entities.append(TodayProfileSensor(manager, "generation", "Генерация за сегодня (Профиль)"))
 
-    if manager.price_buy_sensors:
-        entities.append(MarketStrategySensor(manager, "buy", "Market BUY Strategy (Charge)"))
-    if manager.price_sell_sensors:
-        entities.append(MarketStrategySensor(manager, "sell", "Market SELL Strategy (Discharge)"))
-
     entities.append(InverterOperationModeSensor(manager, "Inverter Mode Command"))
     entities.append(ConsumptionDeviationSensor(manager, "Отклонение потребления (бытовое)"))
 
@@ -919,168 +914,6 @@ class EnergyProfileManager:
             
             await asyncio.sleep(60)
 
-    async def _calculate_heuristic_plan(
-        self, now, batt_soc, buy_strat, sell_strat, scale_today, scale_tomorrow,
-        prof_gen, prof_cons, prof_cons_base, shared_profiles, sim_range, eff
-    ) -> DispatchPlan:
-        """Потокобезопасный асинхронный расчет эвристического плана с отдачей event loop."""
-        slots = []
-        charge_cmds = {}
-        sell_cmds = {}
-        sim_soc = batt_soc
-        b_cap = float(self.get_setting("battery_capacity", 10.0) or 10.0)
-        max_batt_p = float(self.get_setting("battery_max_power", 3.0) or 3.0)
-
-        for h_abs in range(48):
-            await asyncio.sleep(0.005)  # Yield to event loop to keep UI smooth
-            dt_h = (now + timedelta(hours=h_abs)).replace(minute=0, second=0, microsecond=0)
-            h_rel = str(dt_h.hour)
-            today_str = dt_h.strftime("%Y-%m-%d")
-            
-            raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
-            scaled_gen = raw_gen * scale_today if dt_h.date() == now.date() else (raw_gen * scale_tomorrow if dt_h.date() == (now.date() + timedelta(days=1)) else raw_gen)
-
-            slot = GlobalSlot(
-                hour_abs=h_abs,
-                dt_iso=dt_h.isoformat(),
-                price_buy=self.get_price("buy", today_str, dt_h.hour) or 0.0,
-                price_sell=self.get_price("sell", today_str, dt_h.hour) or 0.0,
-                gen_raw=scaled_gen,
-                load_total=float(normalize_float(prof_cons.get(h_rel, 0.0))),
-                load_base=float(normalize_float(prof_cons_base.get(h_rel, 0.0)))
-            )
-            
-            mode, reason, is_buy, is_sell, t_soc = EnergyLogicEngine.get_mode_at(
-                dt_now=dt_h,
-                batt_soc=sim_soc,
-                manager=self,
-                is_forecast=(h_abs > 0),
-                abs_hour=(now.hour + h_abs),
-                profiles=shared_profiles,
-                buy_strategy=buy_strat,
-                sell_strategy=sell_strat
-            )
-            
-            slot.mode = mode
-            slot.reason = reason
-            slot.target_soc = t_soc
-            
-            ts_key = dt_h.strftime("%Y-%m-%d %H:00")
-            is_manual_hour = ts_key in self.hourly_manual_overrides
-            is_legacy_manual = (dt_h.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d") and dt_h.hour in self.manual_mode_overrides)
-            if is_manual_hour or is_legacy_manual:
-                slot.is_manual = True
-            
-            if h_abs == 0:
-                search_prefix = now.strftime("%Y-%m-%d %H")
-                h_override = None
-                for k, v in self.hourly_manual_overrides.items():
-                    if k.startswith(search_prefix):
-                        h_override = v
-                        break
-                p_real, t_soc, c_amps = EnergyLogicEngine.calculate_realtime_power(
-                    mode=mode,
-                    now=now,
-                    batt_soc=batt_soc,
-                    manager=self,
-                    buy_strategy=buy_strat,
-                    sell_strategy=sell_strat,
-                    h_override=h_override
-                )
-                slot.power_ac = p_real
-                slot.target_soc = t_soc
-                slot.charge_amps = c_amps
-                if h_override: slot.is_manual = True
-                p_actual = p_real if mode == "buy" else -p_real if mode == "sale_pv_bat" else 0.0
-            else:
-                p_est = 0.0
-                t_soc_est = sim_soc
-                man_override = self.hourly_manual_overrides.get(ts_key)
-                if man_override:
-                    t_soc_est = float(man_override.get("soc_limit", sim_soc))
-                    _m_mode = man_override.get("mode")
-                    if _m_mode == "buy" and sim_soc < (t_soc_est - 0.05):
-                        p_calc = (max(0.0, t_soc_est - sim_soc) / 100.0 * b_cap) / eff
-                        p_est = min(max_batt_p, round(p_calc, 2))
-                    elif _m_mode == "sale_pv_bat" and sim_soc > (t_soc_est + 0.2):
-                        req_p = (max(0.0, sim_soc - t_soc_est) / 100.0 * b_cap) * eff
-                        p_est = -min(max_batt_p, round(req_p, 2))
-                else:
-                    if mode == "buy":
-                        p_est = buy_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
-                        t_soc_est = buy_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
-                    elif mode == "sale_pv_bat":
-                        p_est = -sell_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
-                        t_soc_est = sell_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
-                
-                slot.power_ac = abs(p_est)
-                slot.target_soc = t_soc_est
-                v_nom = self.get_sensor_float(self.battery_voltage_sensor) or 52.0
-                slot.charge_amps = round((slot.power_ac * 1000.0) / max(10.0, v_nom), 1)
-                p_actual = p_est
-
-            if abs(p_actual) < 0.001:
-                base_load = float(slot.load_base) if (slot.load_base and slot.load_base > 0.01) else float(slot.load_total)
-                net_flow = slot.gen_raw - base_load
-                _h_mode_cls = INVERTER_MODES.get(mode)
-                if _h_mode_cls:
-                    if net_flow > 0 and _h_mode_cls.charge_from_pv:
-                        p_actual = min(net_flow, max_batt_p)
-                    elif net_flow < 0 and _h_mode_cls.discharge_to_house:
-                        p_actual = max(net_flow, -max_batt_p)
-
-            delta_kwh = p_actual * (eff if p_actual > 0 else (1.0/eff))
-            sim_soc = max(0.0, min(100.0, sim_soc + (delta_kwh / b_cap * 100.0)))
-            slot.soc_end = sim_soc
-            
-            if mode == "buy": charge_cmds[now.hour + h_abs] = slot.power_ac
-            elif mode == "sale_pv_bat": sell_cmds[now.hour + h_abs] = slot.power_ac
-            slots.append(slot)
-
-        # High-Fidelity Simulator Pass
-        all_cmds = {}
-        for h, p in charge_cmds.items(): all_cmds[h] = p
-        for h, p in sell_cmds.items(): all_cmds[h] = -p
-        m_overrides = { (now.hour + i): s.mode for i, s in enumerate(slots) }
-        
-        _, sim_log, _ = self.strategy_engine.run_soc_simulation(
-            start_soc=batt_soc,
-            sim_range=sim_range,
-            now=now,
-            commands=all_cmds,
-            mode_overrides=m_overrides,
-            dynamic_floors=sell_strat.get("floors_sliding", {})
-        )
-        
-        for i, slot in enumerate(slots):
-            h_abs_sim = now.hour + i
-            sim_data = sim_log.get(h_abs_sim, {})
-            if sim_data:
-                slot.soc_start = sim_data.get("soc_start", 0.0)
-                slot.soc_end = sim_data.get("soc_end", 0.0)
-                slot.net_p_bat = sim_data.get("net_p_bat", 0.0)
-                
-                # Re-evaluate logic with simulated SOC
-                new_mode, new_reason, _, _, new_t_soc = EnergyLogicEngine.get_mode_at(
-                    dt_now=datetime.fromisoformat(slot.dt_iso),
-                    batt_soc=slot.soc_start,
-                    manager=self,
-                    is_forecast=(i > 0),
-                    abs_hour=h_abs_sim,
-                    profiles=shared_profiles,
-                    buy_strategy=buy_strat,
-                    sell_strategy=sell_strat
-                )
-                slot.mode = new_mode
-                slot.reason = new_reason
-                slot.target_soc = new_t_soc
-            
-            if i == 0:
-                slot.buy_debug = buy_strat
-                slot.sell_debug = sell_strat
-                
-        return DispatchPlan(slots)
-
     async def _calculate_dp_plan(
         self, now, batt_soc, scale_today, scale_tomorrow,
         prof_gen, prof_cons, prof_cons_base,
@@ -1281,12 +1114,6 @@ class EnergyProfileManager:
                 return
 
             self.config_error = None
-
-            buy_strat = self.get_market_strategy("buy") or {}
-            await asyncio.sleep(0.01)
-            
-            sell_strat = self.get_market_strategy("sell") or {}
-            await asyncio.sleep(0.01)
             
             prof_gen = self.get_predicted_profile("generation")
             prof_cons = self.get_predicted_profile("consumption_total")
@@ -1308,16 +1135,9 @@ class EnergyProfileManager:
             hist_tomorrow = sum(float(normalize_float(prof_gen_tomorrow.get(str(h), 0.0))) for h in range(24))
             scale_tomorrow = float(f_tomorrow_val / hist_tomorrow) if (f_tomorrow_val is not None and hist_tomorrow > 0.1) else 1.0
             
-            shared_profiles = {"gen": prof_gen, "cons": prof_cons, "cons_base": prof_cons_base}
             sim_range = list(range(now.hour, now.hour + 48))
             eff = 0.98
 
-            # --- Independent Calculations for both strategies ---
-            heuristic_plan = await self._calculate_heuristic_plan(
-                now, batt_soc, buy_strat, sell_strat, scale_today, scale_tomorrow,
-                prof_gen, prof_cons, prof_cons_base, shared_profiles, sim_range, eff
-            )
-            
             dp_plan = await self._calculate_dp_plan(
                 now, batt_soc, scale_today, scale_tomorrow,
                 prof_gen, prof_cons, prof_cons_base,
@@ -1326,17 +1146,12 @@ class EnergyProfileManager:
             )
             
             # Cache the plans in EnergyProfileManager for the UI sensor attributes
-            self.heuristic_hourly_data = heuristic_plan.to_hourly_data_attr()
+            self.heuristic_hourly_data = {}
             self.dp_hourly_data = dp_plan.to_hourly_data_attr()
             
-            # --- Dynamic routing based on the 'use_dp' switch ---
-            use_dp = self.get_setting("use_dp", False)
-            if use_dp:
-                self.global_plan = dp_plan
-                self.log_to_file("DIAG: Active Global Plan set to Dynamic Programming (DP)")
-            else:
-                self.global_plan = heuristic_plan
-                self.log_to_file("DIAG: Active Global Plan set to Heuristic")
+            self.global_plan = dp_plan
+            self.planned_mode_overrides = { (now.hour + i): s.mode for i, s in enumerate(dp_plan.slots) }
+            self.log_to_file("DIAG: Active Global Plan set to Dynamic Programming (DP)")
 
             # Log inverter mode change if it differs from the last logged mode
             self.log_mode_change_to_file()
@@ -3040,56 +2855,6 @@ class EnergyProfileManager:
         """Calculate scaling coefficient."""
         return self.strategy_engine.get_gen_forecast_coefficient(forecast_value, prof_gen, hour_start, hour_end)
 
-    def get_market_strategy(self, mode="buy", allow_recalc=True):
-        """Complex market strategy solver."""
-        res = self.strategy_engine.get_market_strategy(mode, allow_recalc=allow_recalc)
-        
-        # v11.3.2: Capture Power/SOC/Amps anchor at the start of the hour or mode entry
-        now = dt_util.now()
-        cur_hour = now.hour
-        # v11.6.521: Safe Anchor Permission.
-        # Prevent anchoring zeros during initial calculation or when no strategy is planned (none).
-        # We only anchor if there is a real strategic reason AND a valid state.
-        c_reason = res.get("charge_reason", "none")
-        if c_reason == "none" or res.get("state") == "idle":
-             return res
-
-        is_active = True # Any reason other than 'none' is an active strategic intent
-        
-        # Unified key for the current hour and mode
-        hour_key = f"{cur_hour}_{mode}"
-        stored = self.fixed_strategy_data.get(mode, {"hour_key": ""})
-        
-        if is_active:
-            p_val_new = float(res.get("recommended_power_kw", 0.0))
-            t_soc_new = float(res.get("target_soc", 0.0))
-            stored_p = float(stored.get("power", 0.0))
-            
-            # v11.6.516: High-Water Mark Anchor (Revised).
-            # Update the anchor if:
-            # 1. It's a new hour.
-            # 2. Strategy suggests MORE power than currently locked (budget increase).
-            # If power drops, we stay at the previously locked maximum to avoid jitter.
-            if stored.get("hour_key") != hour_key or p_val_new > (stored_p + 0.05):
-                c_amps = 0.0
-                if self.battery_voltage_sensor:
-                    v_val = self.get_sensor_float(self.battery_voltage_sensor)
-                    if v_val and v_val > 0.1 and p_val_new > 0.01:
-                        c_amps = round_f((p_val_new * 1000.0) / v_val, 2)
-                
-                self.fixed_strategy_data[mode] = {
-                    "id": 1,
-                    "hour_key": hour_key,
-                    "power": p_val_new,
-                    "target_soc": t_soc_new,
-                    "charge_amps": c_amps
-                }
-        else:
-            # Wipe anchor if no longer active
-            self.fixed_strategy_data[mode] = {"id": -1, "hour_key": "", "power": 0.0, "target_soc": 0.0, "charge_amps": 0.0}
-            
-        return res
-
     def get_battery_charge_limit_kw(self, soc):
         """Returns the maximum possible charge power (kW) for a given SOC.
         Uses learned BMS profile if available, otherwise falls back to theoretical CC/CV model.
@@ -3464,29 +3229,21 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             else:
                 sim_hours = list(range(now.hour, sunrise_hour))
 
-        # 1. Get active strategy constraints to merge into simulation
-        buy_strat = self.manager.strategy_engine.get_market_strategy("buy", allow_recalc=False) or {}
-        sell_strat = self.manager.strategy_engine.get_market_strategy("sell", allow_recalc=False) or {}
-        
-        charge_commands = buy_strat.get("charge_commands", {})
-        planned_sell = sell_strat.get("planned_sell", {})
-        
-        merged_commands = {**charge_commands}
-        for h, v in planned_sell.items():
-            merged_commands[int(h)] = -abs(v) # Ensure sell commands are negative
-            
-        buy_sim = buy_strat.get("buy_simulation", {})
-        no_battery_charge_until = buy_sim.get("no_battery_charge_until")
-        pv_curtail_hours = buy_sim.get("pv_curtail_hours")
+        # 1. Get active commands directly from the DP plan (manager.global_plan)
+        merged_commands = {}
+        global_plan = getattr(self.manager, "global_plan", None)
+        if global_plan and global_plan.slots:
+            for slot in global_plan.slots:
+                h_abs = now.hour + slot.hour_abs
+                if slot.mode == "buy":
+                    merged_commands[h_abs] = float(slot.power_ac or 0.0)
+                elif slot.mode == "sale_pv_bat":
+                    merged_commands[h_abs] = -float(slot.power_ac or 0.0)
+
+        no_battery_charge_until = None
+        pv_curtail_hours = None
 
         # 2. Run Unified Simulation Engine
-        # v11.6.355: Comprehensive Sell Debug
-        _sell_debug = {
-            "server_time": now.strftime("%H:%M:%S"),
-            "cur_hour": int(now.hour),
-            "b_soc": round_f(batt_soc, 1),
-            "max_p": round_f(0.0, 2)
-        }
         simulated_soc, charge_log, _ = self.manager.run_soc_simulation(
             batt_soc, sim_hours, now,
             commands=merged_commands,
@@ -4354,133 +4111,6 @@ class EnergyBudgetSensor(SensorEntity):
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
             self._state = 0.0
             self._attrs = {"error": str(e)}
-
-class MarketStrategySensor(SensorEntity):
-    def __init__(self, manager, mode, name):
-        self.manager = manager
-        self.mode = mode
-        self._attr_name = name
-        self._attr_unique_id = f"{manager.entry.entry_id}_market_strategy_{mode}"
-        self._state = "idle"
-        self._attrs = {}
-        self._attr_icon = "mdi:lightning-bolt"
-        self._attr_translation_key = "market_strategy"
-
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(manager.entry.entry_id))},
-            name=manager.entry.data.get("name", "Energy Management"),
-            manufacturer="Energy AI",
-            model="Energy Trader System",
-        )
-
-    @property
-    def native_value(self):
-        res = self.manager.get_market_strategy(self.mode, allow_recalc=False)
-        # v11.9.429: Prioritize descriptive text for the main dashboard
-        return res.get("power_decision", res.get("state", "idle"))
-
-    @property
-    def extra_state_attributes(self):
-        res = self.manager.get_market_strategy(self.mode, allow_recalc=False)
-        _LOGGER.debug("[UI Debug] Strategy %s res keys: %s", self.mode, list(res.keys()))
-        if "limit_used" in res:
-            _LOGGER.debug("[UI Debug] Strategy %s limit_used: %s", self.mode, res["limit_used"])
-
-        now = dt_util.now()
-        cur_hour = now.hour
-
-        def safe_round(val):
-            return round_f(normalize_float(val), 3)
-
-        today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res.get("today_prices", {}).items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
-        tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res.get("tomorrow_prices", {}).items(), key=lambda item: int(item[0]))}
-
-        attrs = {
-            "strategy_version": VERSION,
-            "analyzed_window": res.get("analyzed_window", "Неизвестно"),
-            "price_limit_used": safe_round(res.get("limit_used")),
-            "discharge_limit_used": safe_round(res.get("discharge_limit", 20.0)),
-            "charge_limit_used": safe_round(res.get("charge_limit", 100.0)),
-            "target_price": safe_round(res.get("target_price")),
-            "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
-            "deg_cost": res.get("deg_cost", 0.0),
-            "strategy_candidates": res.get("strategy_candidates", []),
-            "active_periods": res.get("active_periods", ""),
-            "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
-            "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
-            "strategy_decision": res.get("strategy_decision", "Нет данных"),
-            "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
-            "planned_power": {h: f"{d['power']} кВт ({d['reason'] if d.get('reason') else f'Цель: {d['soc']}%'})" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
-            "power_decision": res.get("power_decision", "Ожидание"),
-        }
-
-        # v11.9.587: Move SOC projections up (before prices)
-        if self.mode == "sell":
-            attrs.update({
-                "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_sale_start_pct", 0.0),
-                "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
-                "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "projected_soc_morning_base": res.get("sell_simulation", {}).get("projected_soc_morning_base_pct", 0.0),
-            })
-        else: # buy
-            attrs.update({
-                "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
-                "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
-                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "projected_soc_morning_base": res.get("buy_simulation", {}).get("projected_soc_morning_base_pct", 0.0),
-            })
-
-        attrs["prices_today"] = today_fmt
-        attrs["prices_tomorrow"] = tom_fmt
-
-        # v7.2 - Hide detailed projections if nothing is planned for today
-        # (reduces clutter and avoids 'nonsense' values for future/past windows)
-        is_active = res.get("state") == "active"
-        has_planned = bool(res.get("active_hours", []))
-        show_extra = is_active or has_planned
-
-        b_coeff = round_f(float(getattr(self.manager, "last_blended_coeff", 1.0)), 3)
-        if self.mode == "sell":
-            attrs["sell_debug"] = res.get("arbitrage_sell_debug", "Нет данных")
-            attrs.update({
-                "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_sale_start_pct", 0.0),
-                "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
-                "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
-                "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
-                "arbitrage_sunrise_hour": res.get("arbitrage_buyback", {}).get("sunrise_hour", 0),
-                "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
-                "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
-                "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
-                "arbitrage_limit_reason": res.get("arbitrage_sell_limit_reason", ""),
-                "arbitrage_gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
-                "sim_log": res.get("sell_simulation", {}).get("sim_log", ""),
-                "blended_coeff": b_coeff
-            })
-        else: # buy
-            attrs.update({
-                "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
-                "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
-                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "projected_soc_morning_base": res.get("buy_simulation", {}).get("projected_soc_morning_base_pct", 0.0),
-                "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
-                "buy_debug": res.get("buy_debug", "Нет данных"),
-                "debug_eff": res.get("buy_simulation", {}).get("eff", 0.0),
-                "debug_b_cap": res.get("buy_simulation", {}).get("b_cap", 0.0),
-                "debug_needed_kwh": res.get("buy_simulation", {}).get("needed_kwh_dc", 0.0),
-                "debug_max_p": res.get("buy_simulation", {}).get("max_p", 0.0),
-                "debug_planned_kwh": res.get("buy_simulation", {}).get("p_total_planned", 0.0),
-                "sim_log": res.get("buy_simulation", {}).get("sim_log", ""),
-                "blended_coeff": b_coeff
-            })
-
-        return attrs
-
-    async def async_added_to_hass(self):
-        self.manager.register_listener(self.async_write_ha_state)
-
-
-
 
 class SavingsSensor(SensorEntity):
     """Tracks financial savings / revenue from solar, arbitrage, or grid sales."""
