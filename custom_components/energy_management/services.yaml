@@ -1,0 +1,87 @@
+reset_data:
+  name: Сбросить статистику Energy Management
+  description: Полностью очищает накопленную историю профиля потребления и генерации, обнуляя алгоритмы прогнозирования.
+  fields: {}
+
+export_data:
+  name: Экспорт профиля Energy Management
+  description: Выгружает все текущие исторические данные и настройки энергопрофиля в отдельный JSON файл. Вы можете использовать этот файл для бэкапа или переноса профиля.
+  fields:
+    file_path:
+      name: Путь к файлу
+      description: Абсолютный путь, куда нужно сохранить файл (например, /config/energy_management_backup.json). По умолчанию используется папка /config/.
+      required: false
+      example: "/config/energy_management_backup.json"
+      selector:
+        text:
+
+import_data:
+  name: Импорт профиля Energy Management
+  description: Загружает историю профиля из ранее сохраненного JSON файла бэкапа. Система мгновенно переключится на загруженные исторические данные. Внимание - это перезапишет ваши текущие накопленные данные за сегодня!
+  fields:
+    file_path:
+      name: Путь к файлу
+      description: Абсолютный путь к файлу бэкапа для загрузки. По умолчанию ищет в папке /config/.
+      required: false
+      example: "/config/energy_management_backup.json"
+      selector:
+        text:
+
+reset_bms_profile:
+  name: Сбросить профиль заряда BMS
+  description: Очищает накопленную статистику кривой заряда батареи (BMS profile), позволяя системе обучиться заново.
+  fields: {}
+
+force_buy:
+  name: Принудительная покупка (1ч)
+  description: Устанавливает режим принудительной зарядки АКБ из сети на текущий час. Сбрасывается автоматически в начале следующего часа.
+  fields: {}
+
+stop_sale:
+  name: Остановить продажу (1ч)
+  description: Запрещает любой разряд АКБ на текущий час. Сбрасывается автоматически в начале следующего часа.
+  fields: {}
+
+ai_mode:
+  name: Вернуть AI управление
+  description: Снимает все ручные переопределения и возвращает систему в полностью автоматический режим.
+  fields: {}
+
+set_hourly_override:
+  name: Установить ручной режим для часа
+  description: Переопределяет решение ИИ для конкретного часа.
+  fields:
+    timestamp:
+      name: Временная метка
+      description: Дата и час в формате YYYY-MM-DD HH:00
+      required: true
+      example: "2026-05-11 15:00"
+      selector:
+        text:
+    mode:
+      name: Режим
+      description: Название режима (например, buy, sale_pv_bat, stop_sale)
+      required: true
+      selector:
+        select:
+          options:
+            - label: "Auto (AI)"
+              value: "ai"
+            - label: "Grid Charging (Buy)"
+              value: "buy"
+            - label: "Discharge (Battery)"
+              value: "sale_pv_bat"
+            - label: "Stop Sale"
+              value: "stop_sale"
+            - label: "Normal (PV)"
+              value: "sale_pv"
+    soc_limit:
+      name: Лимит SOC (%)
+      description: Целевой уровень заряда для этого часа.
+      required: false
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
