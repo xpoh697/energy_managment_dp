@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Energy Management Settings",
+        "title": "Energy Management DP Settings",
         "description": "Select the sensors to form your energy management profile.",
         "data": {
           "name": "Name",
@@ -54,7 +54,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Energy Management Settings",
+        "title": "Energy Management DP Settings",
         "description": "Select a category to configure.",
         "menu_options": {
           "main_settings": "Main Settings (Sensors, Prices, Battery)",

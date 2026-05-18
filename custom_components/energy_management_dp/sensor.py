@@ -356,7 +356,7 @@ class EnergyProfileManager:
         config_data = {**entry.data, **entry.options}
 
         # Initialize internal storage handler for preserving profiles across restarts
-        self.store = Store(hass, STORAGE_VERSION, f"energy_management_{entry.entry_id}")
+        self.store = Store(hass, STORAGE_VERSION, f"energy_management_dp_{entry.entry_id}")
 
         self.strategy_engine = StrategyEngine(self)
 
@@ -901,7 +901,7 @@ class EnergyProfileManager:
         )
         
         # v12.0.0: Global Plan refresh (Dedicated background task)
-        self.entry.async_create_background_task(self.hass, self._run_global_plan_loop(), "energy_management_global_plan_loop")
+        self.entry.async_create_background_task(self.hass, self._run_global_plan_loop(), "energy_management_dp_global_plan_loop")
         
     async def _run_global_plan_loop(self):
         """Reliable background loop for Global Plan updates."""
@@ -2261,7 +2261,7 @@ class EnergyProfileManager:
         """Persistent logging for diagnostics (Non-blocking v12.0.27)."""
         def _write_sync():
             try:
-                log_file = self.hass.config.path("energy_management.log")
+                log_file = self.hass.config.path("energy_management_dp.log")
                 timestamp = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
                 full_msg = f"{timestamp} {message}\n"
                 
@@ -2330,7 +2330,7 @@ class EnergyProfileManager:
             
             def _write_mode_sync():
                 try:
-                    log_file = self.hass.config.path("em_mode_change.log")
+                    log_file = self.hass.config.path("em_dp_mode_change.log")
                     timestamp = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
                     full_msg = f"{timestamp} {log_line}\n"
                     

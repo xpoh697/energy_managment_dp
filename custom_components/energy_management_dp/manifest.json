@@ -1,0 +1,15 @@
+{
+  "domain": "energy_management_dp",
+  "name": "Energy Management DP",
+  "codeowners": [
+    "@xpoh697"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/xpoh697/energy_managment_dp#readme",
+  "issue_tracker": "https://github.com/xpoh697/energy_managment_dp/issues",
+  "integration_type": "device",
+  "iot_class": "calculated",
+  "requirements": [],
+  "version": "v1.0.0"
+}

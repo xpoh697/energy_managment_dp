@@ -11,11 +11,11 @@
 
 ## 2. Вспомогательные файлы
 
-### [const.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/const.py)
+### [const.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/const.py)
 **Назначение:** Глобальные константы и ключи настроек.
 - Функций нет.
 
-### [utils.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/utils.py)
+### [utils.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/utils.py)
 **Назначение:** Общие утилиты.
 - `get_kwh_val(state) -> float`: Извлечение kWh из состояния.
 - `normalize_float(val, default=0.0) -> float`: Безопасное приведение к числу.
@@ -26,7 +26,7 @@
 
 ## 3. Ядро логики
 
-### [strategy_base.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/strategy_base.py)
+### [strategy_base.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/strategy_base.py)
 **Назначение:** Базовый движок симуляций `StrategyEngine`.
 
 #### Методы:
@@ -51,18 +51,18 @@
 - `get_market_strategy(mode="buy")`: Заглушка.
 - `_get_arbitrage_info(...)`: Оценка выгоды арбитража.
 
-### [strategy_buy.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/strategy_buy.py)
+### [strategy_buy.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/strategy_buy.py)
 **Назначение:** Стратегия покупки (Зарядка).
 - `get_market_strategy(mode="buy")`: Алгоритм планирования покупки: поиск отрицательных цен, дешевых окон, арбитражных сделок и обеспечение ночного выживания через "мостики" заряда.
 
-### [strategy_sell.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/strategy_sell.py)
+### [strategy_sell.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/strategy_sell.py)
 **Назначение:** Стратегия продажи (Разрядка).
 - `get_strategy_epochs(target_hours, prices_today, prices_tomorrow)`: Группировка окон продажи.
 - `get_market_strategy(mode="sell")`: Алгоритм продажи: поиск пиков цен, расчет излишков, итеративная подгонка бюджета через симуляции дефицита.
 - `_group_contiguous(hours)`: Группировка (переопределено).
 - `_get_soc_from_log(log, key, default)`: Получение SOC.
 
-### [strategy_dp.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/strategy_dp.py)
+### [strategy_dp.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/strategy_dp.py)
 **Назначение:** Планирование через Динамическое Программирование.
 - `get_dp_advice(data_snapshot=None)`: Построение оптимального графа состояний АКБ на 48 часов.
 - `_calc_survival_beyond_horizon(...)`: Оценка энергии после горизонта.
@@ -73,7 +73,7 @@
 
 ## 4. Менеджер и Сенсоры
 
-### [sensor.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/sensor.py)
+### [sensor.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/sensor.py)
 
 #### Класс `EnergyProfileManager` (Сердце системы):
 - `async_load()`: Загрузка данных.
@@ -119,20 +119,20 @@
 
 ## 5. Интеграция в HA
 
-### [__init__.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/__init__.py)
+### [__init__.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/__init__.py)
 - `async_setup`, `async_setup_entry`, `async_unload_entry`.
 - Сервисы: `reset_data`, `export_data`, `import_data`, `reset_bms_profile`, `force_buy`, `stop_sale`, `ai_mode`, `set_hourly_override`.
 - `_async_register_ws_version`, `_async_register_card`.
 
-### [config_flow.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/config_flow.py)
+### [config_flow.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/config_flow.py)
 - `ConfigFlow`: Настройка интеграции.
 - `OptionsFlowHandler`: Изменение настроек.
 
-### [binary_sensor.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/binary_sensor.py)
+### [binary_sensor.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/binary_sensor.py)
 - `EnergyArbitragePossibleSensor`.
 
-### [number.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/number.py)
+### [number.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/number.py)
 - `EnergyManagementNumber`: Числовые настройки в UI.
 
-### [switch.py](file:///g:/systemair/energy_mamagment/custom_components/energy_management/switch.py)
+### [switch.py](file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/switch.py)
 - `EnergyManagementSwitch`: Переключатели в UI.

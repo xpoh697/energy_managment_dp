@@ -65,7 +65,7 @@ def get_management_settings(config_dir: str):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     for entry in data.get("data", {}).get("entries", []):
-        if entry.get("domain") == "energy_management":
+        if entry.get("domain") == "energy_management_dp":
             return {
                 "entry_id": entry.get("entry_id"),
                 "title": entry.get("title"),
@@ -342,12 +342,12 @@ def query_sensor_history(db_path: str, entity_id: str, limit: int = 100):
 
 **1. Целевой адрес на сервере**:
 Обязательный бамп версии перед деплоем в const.py и в manifest.json 
-Все файлы интеграции (из папки `custom_components/energy_management/`) должны синхронизироваться по адресу:
-`\\192.168.100.5\config\custom_components\energy_management`
+Все файлы интеграции (из папки `custom_components/energy_management_dp/`) должны синхронизироваться по адресу:
+`\\192.168.100.5\config\custom_components\energy_management_dp`
 
 **2. Принудительная очистка кэша**:
 После каждой синхронизации файлов на сервере **ОБЯЗАТЕЛЬНО** удалять папку `__pycache__` по целевому адресу:
-`\\192.168.100.5\config\custom_components\energy_management\__pycache__`
+`\\192.168.100.5\config\custom_components\energy_management_dp\__pycache__`
 *Логика*: Home Assistant может использовать скомпилированные байт-код файлы (`.pyc`), игнорируя изменения в исходном коде (`.py`), что приводит к исполнению старых версий логики.
 
 **3. Процедура обновления**:
@@ -358,7 +358,7 @@ def query_sensor_history(db_path: str, entity_id: str, limit: int = 100):
 **4. Резервное копирование базы данных (Debugging)**:
 При необходимости глубокой отладки профилей потребления/генерации или при риске повреждения данных, ИИ-ассистент может запросить у пользователя свежий бэкап базы данных.
 Бэкап должен быть размещен пользователем по адресу:
-`\\192.168.100.5\config\energy_management_backup.json`
+`\\192.168.100.5\config\energy_management_dp_backup.json`
 
 ## 9. Настройки и Переменные (Settings & Parameters)
 

@@ -74,7 +74,7 @@ function getSocInfo(soc) {
   return { icon, color, percent: val.toFixed(0) };
 }
 
-class EnergyManagementCard extends HTMLElement {
+class EnergyManagementDPCard extends HTMLElement {
   constructor() {
     super();
     this._initialized = false;
@@ -727,7 +727,7 @@ class EnergyManagementCard extends HTMLElement {
     const mode = forcedMode || this.shadowRoot.getElementById('modal-mode').value;
     const soc = this.shadowRoot.getElementById('modal-soc').value;
 
-    await this._hass.callService('energy_management', 'set_hourly_override', {
+    await this._hass.callService('energy_management_dp', 'set_hourly_override', {
       timestamp: this._editingTimestamp,
       mode: mode,
       soc_limit: parseFloat(soc)
@@ -754,7 +754,7 @@ class EnergyManagementCard extends HTMLElement {
   }
 
   _updateUI() {
-    const entityId = this._config.entity || 'sensor.energy_management';
+    const entityId = this._config.entity || 'sensor.energy_management_dp';
     const stateObj = this._hass.states[entityId];
     if (!stateObj) return;
 
@@ -1074,12 +1074,12 @@ class EnergyManagementCard extends HTMLElement {
   }
 
   _callService(action) {
-    this._hass.callService('energy_management', action, {});
+    this._hass.callService('energy_management_dp', action, {});
   }
 
   getCardSize() { return 12; }
 }
 
-customElements.define('energy-management-card', EnergyManagementCard);
+customElements.define('energy-management-dp-card', EnergyManagementDPCard);
 window.customCards = window.customCards || [];
-window.customCards.push({ type: "energy-management-card", name: "Energy Management Card", preview: true });
+window.customCards.push({ type: "energy-management-dp-card", name: "Energy Management DP Card", preview: true });

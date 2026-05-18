@@ -68,12 +68,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Register export and import services
     async def handle_export_data(call):
-        file_path = call.data.get("file_path", hass.config.path("energy_management_backup.json"))
+        file_path = call.data.get("file_path", hass.config.path("energy_management_dp_backup.json"))
         await hass.async_add_executor_job(manager.export_data, file_path)
         _LOGGER.info(f"Energy Management statistics exported to {file_path}")
 
     async def handle_import_data(call):
-        file_path = call.data.get("file_path", hass.config.path("energy_management_backup.json"))
+        file_path = call.data.get("file_path", hass.config.path("energy_management_dp_backup.json"))
         success = await hass.async_add_executor_job(manager.import_data, file_path)
         if success:
             await manager.store.async_save(manager.data)
@@ -144,7 +144,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle removal of an entry."""
     from homeassistant.helpers.storage import Store
     from .sensor import STORAGE_VERSION
-    store = Store(hass, STORAGE_VERSION, f"energy_management_{entry.entry_id}")
+    store = Store(hass, STORAGE_VERSION, f"energy_management_dp_{entry.entry_id}")
     await store.async_remove()
 
 
@@ -170,7 +170,7 @@ def _async_register_ws_version(hass: HomeAssistant) -> None:
 
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Register the Lovelace card with a cache-busting version query string."""
-    card_url = f"/api/{DOMAIN}/static/energy-management-card.js?v={VERSION}"
+    card_url = f"/api/{DOMAIN}/static/energy-management-dp-card.js?v={VERSION}"
 
     # Try to register as a Lovelace resource (Storage Mode)
     registered_as_resource = await _async_register_lovelace_resource(hass, card_url)
@@ -199,7 +199,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bo
     existing = None
     try:
         for item in resources.async_items():
-            if "energy-management-card.js" in item.get("url", ""):
+            if "energy-management-dp-card.js" in item.get("url", ""):
                 existing = item
                 break
     except Exception:
@@ -231,7 +231,7 @@ class CardStaticView(HomeAssistantView):
 
     async def get(self, request, filename: str):
         """Handle GET request for static files."""
-        if filename != "energy-management-card.js":
+        if filename != "energy-management-dp-card.js":
             return web.Response(status=404)
 
         file_path = self._www_path / filename

@@ -71,7 +71,7 @@ def get_management_settings(config_dir: str):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     for entry in data.get("data", {}).get("entries", []):
-        if entry.get("domain") == "energy_management":
+        if entry.get("domain") == "energy_management_dp":
             return {
                 "entry_id": entry.get("entry_id"),
                 "title": entry.get("title"),
@@ -177,7 +177,7 @@ def query_sensor_history(db_path: str, entity_id: str, limit: int = 100):
 
 ## 9. Развертывание (Deployment)
 1. **Бамп версии**: Обязательно в `const.py` и `manifest.json`.
-2. **Синхронизация**: `robocopy` в `\\192.168.100.5\config\custom_components\energy_management`.
+2. **Синхронизация**: `robocopy` в `\\192.168.100.5\config\custom_components\energy_management_dp`.
 3. **Очистка**: Удаление `__pycache__` на сервере.
 
 ## 10. Настройки и Переменные (Settings & Parameters)

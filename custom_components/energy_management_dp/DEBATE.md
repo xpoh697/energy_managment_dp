@@ -1177,3 +1177,57 @@ soc = min(100, int(round((si * energy_step) / b_cap * 100.0)))
 2. Используем `price_sell_limit` и `price_sell_only_pv` для физических переходов режимов (`ACT_DIS` -> `sale_pv_bat`/`sale_pv` и `cheap_ahead` -> `no_pv_sale_no_bat`).
 3. Новую изолированную переменную `dp_price_sell_limit` (из `CONF_DP_PRICE_SELL_LIMIT`) используем строго как `min_sell_p` для `top_sell_set` и оценки остатка емкости батареи в конце горизонта.
 4. Версию поднимаем до `v12.1.28`.
+
+---
+
+## [2026-05-18 20:35] Задача: Переименование интеграции energy_management в energy_management_dp для параллельной работы
+
+### Archi
+Для того чтобы запустить копию интеграции параллельно на одном инстансе Home Assistant без конфликтов, нам нужно выполнить глубокий рефакторинг уникальных идентификаторов домена, файлов хранилищ и Lovelace карточки.
+Предлагаю следующее решение:
+1. Переименовать папку интеграции `custom_components/energy_management` -> `custom_components/energy_management_dp`.
+2. Изменить константу домена `DOMAIN = "energy_management"` на `"energy_management_dp"` в `const.py`.
+3. В `manifest.json` изменить домен на `"energy_management_dp"`, имя на `"Energy Management DP"`, и обновить ссылки на гит репозиторий.
+4. В `__init__.py` и `sensor.py` переименовать файлы хранилищ JSON Store с `f"energy_management_{entry.entry_id}"` на `f"energy_management_dp_{entry.entry_id}"`, а также изменить дефолтный файл бэкапа на `energy_management_dp_backup.json` и файл лога на `energy_management_dp.log`.
+5. Переименовать карточку Lovelace: `www/energy-management-card.js` -> `www/energy-management-dp-card.js`. Зарегистрировать элемент как `energy-management-dp-card` и перенаправить все вызовы служб на домен `energy_management_dp`.
+6. Обновить файлы настроек переводов (`strings.json`, `translations/en.json`, `translations/ru.json`), добавив суффикс `DP`, чтобы пользователь мог различать обе интеграции при добавлении в UI.
+
+### Skeptic
+Анализ решения Archi выявил 3 критические уязвимости/проблемы:
+1. **Конфликт в Lovelace JS при регистрации кастомного элемента**:
+   Если мы зарегистрируем кастомный элемент `EnergyManagementCard` с тем же именем класса в глобальном пространстве имен `window.customCards` или через `customElements.define`, Home Assistant выдаст ошибку `DOMException: Registration failed for type 'energy-management-card'. A duplicate definition was found.` или будет использовать старую карточку. Мы должны переименовать как сам тег элемента на `energy-management-dp-card`, так и имя JS-класса на `EnergyManagementDPCard`.
+2. **Конфликт файлов бэкапа и данных в фоновых потоках**:
+   При параллельной работе обе интеграции по умолчанию могут писать логи в `energy_management.log` или бэкапы в `energy_management_backup.json` (например, в корне HA config). Если пути не будут изолированы, они будут перезаписывать данные друг друга, что приведет к повреждению истории планирования и непредсказуемым ошибкам восстановления. Все имена файлов бэкапов и логов должны быть изолированы с суффиксом `_dp`.
+3. **Имена сенсоров и `entity_id` в Lovelace карточке**:
+   В Lovelace карточке по умолчанию зашит поиск сенсора `'sensor.energy_management'`. Если запустить карточку DP на сущности `'sensor.energy_management_dp'`, но оставить дефолтное значение `'sensor.energy_management'` в JS коде, то карточка будет считывать данные и графики старой интеграции! Нужно жестко обновить дефолтные значения `entityId` в коде карточки на `'sensor.energy_management_dp'`.
+
+### Заключение
+Консенсус достигнут:
+1. В `www/energy-management-dp-card.js` мы переименуем класс в `EnergyManagementDPCard`, тег in `energy-management-dp-card`, имя в `EnergyManagement DP Card`, а также дефолтный `entityId` на `'sensor.energy_management_dp'`. Все вызовы служб будут обращаться строго к домену `'energy_management_dp'`.
+2. Все обращения к файлам логов переводим на `energy_management_dp.log`, файлы бэкапа — на `energy_management_dp_backup.json`, а имя фонового таска планировщика — на `"energy_management_dp_global_plan_loop"`.
+3. Название хранилища `.storage` изолируем как `f"energy_management_dp_{entry.entry_id}"`.
+4. Для переименования папки и файлов применим `git mv` (через powershell), чтобы сохранить историю коммитов.
+
+---
+
+## [2026-05-18 21:16] Задача: Обновление технического задания (ТЗ) и структуры проекта с заменой путей на правильные (energy_management_dp)
+
+### Archi
+Для обеспечения полной согласованности документации с новой архитектурой параллельного запуска, мы должны обновить все ссылки и пути в файлах ТЗ (`TECHNICAL_SPECIFICATION.md`, `TECHNICAL_SPECIFICATION_V2.md`) и проектной структуре (`PROJECT_STRUCTURE.md`).
+Предлагаю:
+1. Заменить все упоминания папки `custom_components/energy_management` на `custom_components/energy_management_dp`.
+2. Заменить все упоминания домена `energy_management` в примерах кода и текстах на `energy_management_dp`.
+3. Заменить все ссылки на файлы вида `file:///g:/systemair/energy_mamagment` на правильный рабочий репозиторий `file:///g:/systemair/energy_managment_dp` с суффиксом `_dp` в путях файлов.
+4. Обновить пути бэкапа `energy_management_backup.json` на `energy_management_dp_backup.json`.
+
+### Skeptic
+Критически важно обновить документацию, чтобы разработчик и AI-агенты не использовали старые пути при развёртывании. Вот мои 3 замечания по безопасности изменений:
+1. **Точность локальных ссылок**: Ссылки вида `file:///g:/systemair/energy_mamagment/...` в `PROJECT_STRUCTURE.md` должны указывать на правильный путь `file:///g:/systemair/energy_managment_dp/custom_components/energy_management_dp/...`. Ошибка в ссылке сделает файлы в IDE некликаябельными.
+2. **Точность путей развертывания на сервере (robocopy)**: Пути синхронизации типа `\\192.168.100.5\config\custom_components\energy_management` должны быть строго заменены на `\\192.168.100.5\config\custom_components\energy_management_dp`. Иначе при автоматическом деплое файлы новой интеграции перезапишут старую на сервере!
+3. **Безопасность автозамены**: Никаких автоматических глобальных замен по всему проекту! Все правки должны производиться точечно и только в файлах документации, сохраняя работоспособность и не затрагивая другие файлы.
+
+### Заключение
+Консенсус достигнут:
+1. Вносим точечные изменения в `TECHNICAL_SPECIFICATION.md`, `TECHNICAL_SPECIFICATION_V2.md` и `PROJECT_STRUCTURE.md`.
+2. Обновляем все локальные пути, URI-схемы, пути синхронизации robocopy и имена файлов бэкапов/логов на правильные с суффиксом `_dp`.
+3. Все изменения производятся без использования глобальной автоматической автозамены.
