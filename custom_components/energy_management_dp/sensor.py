@@ -97,7 +97,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if has_consumption:
         for key, (name_ru, days) in periods.items():
             entities.append(ProfileAveragedSensor(manager, "consumption", key, f"Профиль Потребления ({name_ru})", days))
-        entities.append(LiveHourlySensor(manager, "consumption", "Текущее почасовое потребление"))
         entities.append(TodayProfileSensor(manager, "consumption", "Профиль потребления сегодня"))
 
         # Add the Smart Budget sensor using the custom period length as the profile baseline
@@ -105,9 +104,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(PotentialExportTodaySensor(manager))
 
     if has_generation:
-        for key, (name_ru, days) in periods.items():
-            entities.append(ProfileAveragedSensor(manager, "generation", key, f"Профиль Генерации ({name_ru})", days))
-        entities.append(LiveHourlySensor(manager, "generation", "Текущая почасовая генерация"))
         entities.append(TodayProfileSensor(manager, "generation", "Генерация за сегодня (Профиль)"))
 
     entities.append(InverterOperationModeSensor(manager, "Inverter Mode Command"))
@@ -148,7 +144,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if has_consumption and has_generation:
         entities.append(InstantPowerAveragedSensor(manager, "load"))
         entities.append(InstantPowerAveragedSensor(manager, "gen"))
-        entities.append(SolarWasteSensor(manager, "Упущенная солнечная энергия"))
         entities.append(BMSLearnedProfileSensor(manager))
 
     # Real-time Grid Interaction
@@ -3949,60 +3944,6 @@ class InstantPowerAveragedSensor(SensorEntity):
             "samples_count": len(self.manager.power_history),
             "window_minutes": 10
         }
-
-class LiveHourlySensor(RestoreEntity, SensorEntity):
-    """Keeps the original live hourly behavior, for reference and diagnostics."""
-    def __init__(self, manager, ptype, name):
-        self.manager = manager
-        self.ptype = ptype
-        self._attr_name = name
-        self._attr_unique_id = f"{manager.entry.entry_id}_live_{ptype}"
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_state_class = SensorStateClass.TOTAL
-        self._attr_icon = "mdi:lightning-bolt"
-
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(manager.entry.entry_id))},
-            name=manager.entry.data.get("name", "Energy Management"),
-            manufacturer="Energy AI",
-            model="Energy Trader System",
-        )
-
-    async def async_added_to_hass(self):
-        await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state and last_state.state not in ("unknown", "unavailable"):
-            val = normalize_float(last_state.state)
-            # Recover into manager if it hasn't accumulated anything since restart
-            if self.ptype == "consumption" and (self.manager.current_consumption_base or 0) == 0:
-                self.manager.current_consumption_base = val
-                # v11.1.14/58 - Restore true total from attributes to reconstruct the deduction
-                total_val = normalize_float(last_state.attributes.get("total_consumption"))
-                if total_val >= val:
-                    self.manager.current_consumption_total = total_val
-                    self.manager.current_hourly_deduct = round_f((total_val or 0.0) - (val or 0.0), 3)
-                else:
-                    self.manager.current_consumption_total = val # Fallback
-                    
-            if self.ptype == "generation" and self.manager.current_generation == 0:
-                self.manager.current_generation = val
-        self.manager.register_listener(self.async_write_ha_state)
-
-    @property
-    def native_value(self):
-        if self.ptype == "consumption":
-            return round_f(self.manager.current_consumption_base, 3)
-        return round_f(self.manager.current_generation, 3)
-
-    @property
-    def extra_state_attributes(self):
-        if self.ptype == "consumption":
-            return {
-                "total_consumption": round_f(self.manager.current_consumption_total, 3)
-            }
-        return {}
-
 class TodayProfileSensor(SensorEntity):
     """Shows the actual accumulated hourly profile for the current day."""
     def __init__(self, manager, ptype, name):
@@ -4512,76 +4453,6 @@ class BatteryDegradationSensor(SensorEntity):
             "rated_cycles": cycles,
             "note": "arbitrage_note"
         }
-
-class SolarWasteSensor(SensorEntity):
-    """Tracks lost solar energy (curtailment) when battery is full."""
-    def __init__(self, manager, name):
-        self.manager = manager
-        self._attr_name = name
-        self._attr_translation_key = "solar_waste"
-        self._attr_unique_id = f"{manager.entry.entry_id}_solar_waste"
-        self._attr_icon = "mdi:solar-power-variant-outline"
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(manager.entry.entry_id))},
-            name=manager.entry.data.get("name", "Energy Management"),
-            manufacturer="Energy AI",
-            model="Energy Trader System",
-        )
-
-    async def async_added_to_hass(self):
-        self.manager.register_listener(self.async_write_ha_state)
-
-    @property
-    def native_value(self):
-        return round_f(self.manager.data.get("temp_daily_waste", 0.0), 3)
-
-    @property
-    def extra_state_attributes(self):
-        # Calculate possible daily revenue loss if we sell it at current price
-        prices_sell = self.manager.data.get("prices_sell", {})
-        now = dt_util.now()
-        today_str = now.strftime("%Y-%m-%d")
-        cur_hour_int = now.hour
-        cur_hour = str(cur_hour_int)
-
-        cur_price = 0.0
-        if today_str in prices_sell and cur_hour in prices_sell[today_str]:
-            try:
-                cur_price = float(str(prices_sell[today_str][cur_hour]).replace(',', '.'))
-            except ValueError: pass
-
-        waste_kwh = self.manager.data.get("temp_daily_waste", 0.0)
-
-        # Recommendation logic
-        rec = "Система сбалансирована"
-        if self.manager.current_solar_waste_power > 0.5:
-            rec = f"Теряется {self.manager.current_solar_waste_power} кВт. Рекомендуем включить мощную нагрузку!"
-        elif waste_kwh > 2.0:
-            rec = "Значительные потери за день. Рассмотрите возможность увеличения емкости АКБ."
-
-        # Estimate potential power now
-        prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-        prof_val = float(prof_gen.get(cur_hour, 0.0))
-        coeff = float(getattr(self.manager, "last_blended_coeff", 1.0))
-        potential_kw = round_f(max(prof_val * coeff, self.manager.avg_gen_kw), 3)
-
-        # Truncate impossible value (one-time fix for existing corruption)
-        if waste_kwh > 50.0 and self.manager.avg_gen_kw < 20.0:
-             # If waste is > 50kWh but current gen is normal, something is wrong. 
-             # We don't reset fully to not lose history, but we could cap it.
-             pass 
-
-        return {
-            "current_waste_kw": self.manager.current_solar_waste_power,
-            "lost_potential_revenue": round_f(waste_kwh * cur_price, 2),
-            "recommendation": rec,
-            "potential_power_kw": potential_kw
-        }
-
-
 class BatteryAutonomySensor(SensorEntity):
     """Calculates how long the battery will last at current load."""
     def __init__(self, manager, name):
