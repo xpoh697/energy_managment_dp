@@ -3305,6 +3305,8 @@ class InverterOperationModeSensor(SensorEntity):
         self._mode_lock_until = None
         self._locked_mode = None
         self._last_logged_hour = None
+        self._soc_target_completed = {}
+        self._last_planned_mode_by_hour = {}
         # v11.9.705: Latch for inverter commands (Stability TS)
         self._latched_power = 0.0
         self._latched_amps = 0.0
@@ -3341,29 +3343,99 @@ class InverterOperationModeSensor(SensorEntity):
             batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
             min_soc = float(self.manager.get_setting(CONF_DP_MIN_SOC, 10.0))
             
-            use_dp = self.manager.get_setting("use_dp", False)
-            if not use_dp:
-                # 2. Mode Lock Logic (Relaxed v11.9.361)
-                # Only apply strict locking for critical transitions: buy <-> sale_pv_bat
-                is_emergency = (raw_mode == "bat_emergency" or batt_soc <= (min_soc - 0.5))
-                
-                is_critical_pair = (
-                    (self._locked_mode == "buy" and raw_mode == "sale_pv_bat") or
-                    (self._locked_mode == "sale_pv_bat" and raw_mode == "buy")
+            # --- Ported ha-energy-scheduler protection logic (v12.8.0) ---
+            hour_key = now.strftime("%Y-%m-%d %H")
+            
+            # 1. Prevent memory leaks: clean up old keys in dictionaries
+            for k in list(self._soc_target_completed.keys()):
+                if k != hour_key:
+                    self._soc_target_completed.pop(k, None)
+            for k in list(self._last_planned_mode_by_hour.keys()):
+                if k != hour_key:
+                    self._last_planned_mode_by_hour.pop(k, None)
+            
+            # Reset completed flag if the planned mode itself changes within the hour
+            last_mode = self._last_planned_mode_by_hour.get(hour_key)
+            if last_mode is not None and last_mode != raw_mode:
+                self._soc_target_completed[hour_key] = False
+                self.manager.log_to_file(
+                    f"DIAG: Planned mode changed from {last_mode} to {raw_mode} within hour {hour_key}. "
+                    f"Resetting target completion flag."
                 )
-                
-                if is_critical_pair and not is_emergency and self._mode_lock_until and now < self._mode_lock_until:
-                    if self._locked_mode:
-                        raw_mode = self._locked_mode
-                
-                # 3. Mode Change Detection
-                if raw_mode != self._locked_mode:
-                    # Lock for 10 minutes
-                    self._mode_lock_until = now + timedelta(minutes=10)
-                    self._locked_mode = raw_mode
-            else:
+            self._last_planned_mode_by_hour[hour_key] = raw_mode
+
+            # Detect hour boundary shift
+            hour_changed = False
+            if self._last_logged_hour is not None and now.hour != self._last_logged_hour:
+                hour_changed = True
+            self._last_logged_hour = now.hour
+
+            is_emergency = (raw_mode == "bat_emergency" or batt_soc <= (min_soc - 0.5))
+            is_manual = getattr(slot0, "is_manual", False)
+
+            # 2. Hysteresis checking at startup, hour change, or first hour run to avoid immediate cycle
+            if (hour_changed or not hour_key in self._soc_target_completed) and not is_manual and not is_emergency:
+                hysteresis = 2.0  # 2% buffer like in ha-energy-scheduler
+                target_soc = getattr(slot0, "target_soc", 10.0)
+                if raw_mode == "buy" and batt_soc >= (target_soc - hysteresis):
+                    self._soc_target_completed[hour_key] = True
+                    self.manager.log_to_file(
+                        f"DIAG: Startup/HourChange: SOC already near target for charging ({batt_soc}% >= {target_soc - hysteresis}%), "
+                        f"skipping buy action for hour {hour_key}."
+                    )
+                elif raw_mode == "sale_pv_bat" and batt_soc <= (target_soc + hysteresis):
+                    self._soc_target_completed[hour_key] = True
+                    self.manager.log_to_file(
+                        f"DIAG: Startup/HourChange: SOC already near target for discharging ({batt_soc}% <= {target_soc + hysteresis}%), "
+                        f"skipping sale_pv_bat action for hour {hour_key}."
+                    )
+
+            # 3. Active target monitoring and auto-completion inside the hour
+            if not is_manual and not is_emergency:
+                target_soc = getattr(slot0, "target_soc", 10.0)
+                if self._soc_target_completed.get(hour_key):
+                    # Target already reached: revert to default solar mode (sale_pv)
+                    raw_mode = "sale_pv"
+                else:
+                    if raw_mode == "buy" and batt_soc >= target_soc:
+                        self._soc_target_completed[hour_key] = True
+                        raw_mode = "sale_pv"
+                        self.manager.log_to_file(
+                            f"DIAG: SOC target reached for charging ({batt_soc}% >= {target_soc}%), "
+                            f"reverting to sale_pv for the rest of hour {hour_key}."
+                        )
+                    elif raw_mode == "sale_pv_bat" and batt_soc <= target_soc:
+                        self._soc_target_completed[hour_key] = True
+                        raw_mode = "sale_pv"
+                        self.manager.log_to_file(
+                            f"DIAG: SOC target reached for discharging ({batt_soc}% <= {target_soc}%), "
+                            f"reverting to sale_pv for the rest of hour {hour_key}."
+                        )
+
+            # 4. Standard 10-minute relay protection fallback (v11.9.361 lock)
+            # Safe override triggers: emergency, manual command, or hour boundary change
+            bypass_lock = is_emergency or is_manual or hour_changed
+
+            if bypass_lock:
                 self._mode_lock_until = None
                 self._locked_mode = raw_mode
+            else:
+                if self._mode_lock_until and now < self._mode_lock_until:
+                    if self._locked_mode:
+                        if raw_mode != self._locked_mode:
+                            remaining = (self._mode_lock_until - now).total_seconds()
+                            self.manager.log_to_file(
+                                f"DIAG: Anti-Chattering Active! Blocking transition {self._locked_mode} -> {raw_mode}. "
+                                f"Forcing locked mode {self._locked_mode}. Lock expires in {int(remaining)}s"
+                            )
+                        raw_mode = self._locked_mode
+
+                if raw_mode != self._locked_mode:
+                    self._mode_lock_until = now + timedelta(minutes=10)
+                    self._locked_mode = raw_mode
+                    self.manager.log_to_file(
+                        f"DIAG: Inverter mode locked to {raw_mode} for 10 minutes (until {self._mode_lock_until.strftime('%H:%M:%S')})."
+                    )
                 
             # Update manager with final mode
             self.manager.current_inverter_mode = self._locked_mode or raw_mode
