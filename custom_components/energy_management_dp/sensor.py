@@ -553,8 +553,6 @@ class EnergyProfileManager:
         
         # v12.0.0: Global Dispatch Plan
         self.global_plan = None
-        self.heuristic_hourly_data = {}
-        self.dp_hourly_data = {}
 
     def set_max_days(self, days):
         self.max_days = days
@@ -1139,10 +1137,6 @@ class EnergyProfileManager:
                 prof_gen_tomorrow, prof_cons_tomorrow, prof_cons_base_tomorrow,
                 sim_range, eff
             )
-            
-            # Cache the plans in EnergyProfileManager for the UI sensor attributes
-            self.heuristic_hourly_data = {}
-            self.dp_hourly_data = dp_plan.to_hourly_data_attr()
             
             self.global_plan = dp_plan
             self.planned_mode_overrides = { (now.hour + i): s.mode for i, s in enumerate(dp_plan.slots) }
@@ -3489,9 +3483,6 @@ class InverterOperationModeSensor(SensorEntity):
                 "mode_lock_until": self._mode_lock_until.isoformat() if self._mode_lock_until else "None",
                 "planned_modes_24h": plan.to_planned_modes_24h(),
                 "hourly_data": plan.to_hourly_data_attr(),
-                "use_dp": self.manager.get_setting("use_dp", False),
-                "heuristic_hourly_data": getattr(self.manager, "heuristic_hourly_data", {}),
-                "dp_hourly_data": getattr(self.manager, "dp_hourly_data", {}),
                 "forecast_coefficient_blended": round_f(self.manager.last_blended_coeff, 3),
                 "plan_last_updated": plan._last_updated.isoformat(),
                 "actual_kwh_so_far": round_f(float(self.manager.data.get("temp_daily_gen", 0.0) or 0.0), 2)

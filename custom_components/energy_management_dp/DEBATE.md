@@ -1394,6 +1394,35 @@ soc = min(100, int(round((si * energy_step) / b_cap * 100.0)))
 3. В `sensor.py` удаляем цикл создания `ProfileAveragedSensor` для генерации.
 4. Проверяем компиляцию, деплоим на сервер и зачищаем `__pycache__`.
 
+---
+
+## [2026-05-18 23:28] Задача: Удаление атрибутов эвристического планировщика из Inverter Mode Command
+
+### Archi
+Поскольку мы полностью удалили все старые стратегии и оставили исключительно стратегию динамического программирования (DP), датчик `InverterOperationModeSensor` ("Inverter Mode Command") больше не нуждается в атрибутах, указывающих на выбор стратегий или промежуточные данные старого планировщика.
+Предлагаю:
+1. Удалить атрибуты `use_dp`, `heuristic_hourly_data` и `dp_hourly_data` из метода `extra_state_attributes` класса `InverterOperationModeSensor` в `sensor.py`.
+2. Полностью вырезать поля `self.heuristic_hourly_data` и `self.dp_hourly_data` из менеджера `EnergyProfileManager` в `sensor.py`, так как они больше нигде не используются, что освободит оперативную память и упростит поддержку кода.
+3. В интерфейсной карточке `www/energy-management-dp-card.js` убрать `.tab-container` и кнопки переключения вкладок, а также весь сопутствующий код переключения и селекторы, нацелив карточку напрямую на отображение `hourly_data` (которая и так содержит финальный DP-план). Это значительно освежит дизайн и избавит пользователя от лишних кликов.
+
+### Skeptic
+Внедрение единого источника правды через DP и зачистка мусорных атрибутов — это отличный шаг к повышению надежности и производительности. Однако, перед утверждением кода, я выдвигаю следующие 3 критических требования:
+1. **Безопасность UI-рендеринга (Reference Errors)**: Если мы уберем `_activeTab` и атрибуты `heuristic_hourly_data`/`dp_hourly_data`, мы должны быть абсолютно уверены, что в коде карточки `energy-management-dp-card.js` не осталось скрытых обращений к ним. Любая проверка вида `this._activeTab === 'dp'` должна быть заменена на безусловное использование `hourly_data` / `soc_limit`, чтобы избежать падения рендеринга Web Component с ошибкой `undefined`.
+2. **Исключение утечки памяти на сервере**: В `sensor.py` в методе `async_update_global_plan` обязательно убрать строки кэширования `self.heuristic_hourly_data = {}` и `self.dp_hourly_data = dp_plan.to_hourly_data_attr()`. Иначе эти поля будут продолжать создаваться и накапливать пустые словари, засоряя память инстанса Home Assistant.
+3. **Бамп версии**: Изменения в структуре карточки и атрибутах сенсора требуют повышения версии интеграции до `v12.4.0` (VERSION_CODE: `1240`) для корректной инвалидации кэша браузера и обновления ресурсов в Home Assistant.
+
+### Заключение
+Консенсус достигнут:
+1. Бампаем версию до `v12.4.0` (`const.py`, `manifest.json`).
+2. В `sensor.py`:
+   - Из `InverterOperationModeSensor.extra_state_attributes` удаляем ключи `"use_dp"`, `"heuristic_hourly_data"`, `"dp_hourly_data"`.
+   - В `EnergyProfileManager.__init__` и `async_update_global_plan` полностью вырезаем инициализацию и кэширование `self.heuristic_hourly_data` и `self.dp_hourly_data`.
+3. В `www/energy-management-dp-card.js`:
+   - Полностью вырезаем блок `.tab-container` и стили `.tab-btn`, `.tab-container`, `.active-dot`.
+   - Удаляем метод `_switchTab(tab)` и инициализацию `this._activeTab` в конструкторе.
+   - Во всех методах (`_openModal`, `_updateUI`, `_renderTimeline`, `extra_state_attributes`) заменяем условное переключение данных на прямое использование `attrs.hourly_data` (с корректным определением `displaySoc` на основе `hourData.soc_limit ?? hourData.soc`).
+4. Проверяем компиляцию, деплоим изменения на сервер Home Assistant с очисткой `__pycache__`.
+
 
 
 

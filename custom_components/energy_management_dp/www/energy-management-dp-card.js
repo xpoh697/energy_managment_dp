@@ -78,14 +78,6 @@ class EnergyManagementDPCard extends HTMLElement {
   constructor() {
     super();
     this._initialized = false;
-    this._activeTab = null;
-  }
-
-  _switchTab(tab) {
-    this._activeTab = tab;
-    const container = this.shadowRoot.getElementById('timeline-container');
-    if (container) container._lastKeys = null;
-    this._updateUI();
   }
 
   set hass(hass) {
@@ -520,19 +512,6 @@ class EnergyManagementDPCard extends HTMLElement {
           </div>
         </div>
 
-        <div class="tab-container">
-          <button id="tab-heuristic" class="tab-btn heur-tab" onclick="this.getRootNode().host._switchTab('heuristic')">
-            <ha-icon icon="mdi:console"></ha-icon>
-            <span>Эвристика</span>
-            <span id="badge-heur" class="active-dot heur-active" style="display:none;">● ACTIVE</span>
-          </button>
-          <button id="tab-dp" class="tab-btn dp-tab" onclick="this.getRootNode().host._switchTab('dp')">
-            <ha-icon icon="mdi:brain"></ha-icon>
-            <span>DP Оптимизатор</span>
-            <span id="badge-dp" class="active-dot" style="display:none;">● ACTIVE</span>
-          </button>
-        </div>
-
         <div id="timeline-container">
           <!-- Dynamic sections TODAY / TOMORROW will be here -->
         </div>
@@ -637,12 +616,7 @@ class EnergyManagementDPCard extends HTMLElement {
 
   _openModal(timestamp, currentMode) {
     const attrs = this._hass.states[this._config.entity].attributes;
-    let data = attrs.hourly_data || {};
-    if (this._activeTab === 'heuristic' && attrs.heuristic_hourly_data && Object.keys(attrs.heuristic_hourly_data).length > 0) {
-      data = attrs.heuristic_hourly_data;
-    } else if (this._activeTab === 'dp' && attrs.dp_hourly_data && Object.keys(attrs.dp_hourly_data).length > 0) {
-      data = attrs.dp_hourly_data;
-    }
+    const data = attrs.hourly_data || {};
     const hourData = data[timestamp] || {};
     const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : (hourData.soc !== undefined ? hourData.soc : 100);
 
@@ -689,7 +663,7 @@ class EnergyManagementDPCard extends HTMLElement {
     // v12.0.38: Explicitly show Forecast vs Target
     const forecastEl = this.shadowRoot.getElementById('info-forecast-soc');
     if (forecastEl) {
-      const displaySoc = (this._activeTab === 'dp' && hourData.soc_limit !== undefined) ? hourData.soc_limit : hourData.soc;
+      const displaySoc = hourData.soc_limit !== undefined ? hourData.soc_limit : hourData.soc;
       forecastEl.innerText = `${displaySoc !== undefined ? displaySoc.toFixed(1) : '--'}%`;
     }
 
@@ -762,37 +736,8 @@ class EnergyManagementDPCard extends HTMLElement {
     const soc = parseFloat(attrs.battery_soc) || 0;
     const bms = attrs.bms_status || {};
 
-    // Tab switching and active indicators
-    const useDP = attrs.use_dp || false;
-    if (!this._activeTab) {
-      this._activeTab = useDP ? 'dp' : 'heuristic';
-    }
-
-    // Toggle ● ACTIVE badge visibility
-    const badgeHeur = this.shadowRoot.getElementById('badge-heur');
-    const badgeDP = this.shadowRoot.getElementById('badge-dp');
-    if (badgeHeur) badgeHeur.style.display = !useDP ? 'inline-flex' : 'none';
-    if (badgeDP) badgeDP.style.display = useDP ? 'inline-flex' : 'none';
-
-    // Highlight selected tab button
-    const tabHeur = this.shadowRoot.getElementById('tab-heuristic');
-    const tabDP = this.shadowRoot.getElementById('tab-dp');
-    if (tabHeur) {
-      if (this._activeTab === 'heuristic') tabHeur.classList.add('selected');
-      else tabHeur.classList.remove('selected');
-    }
-    if (tabDP) {
-      if (this._activeTab === 'dp') tabDP.classList.add('selected');
-      else tabDP.classList.remove('selected');
-    }
-
     // Select target timeline data
-    let hourlyData = attrs.hourly_data || {};
-    if (this._activeTab === 'heuristic' && attrs.heuristic_hourly_data && Object.keys(attrs.heuristic_hourly_data).length > 0) {
-      hourlyData = attrs.heuristic_hourly_data;
-    } else if (this._activeTab === 'dp' && attrs.dp_hourly_data && Object.keys(attrs.dp_hourly_data).length > 0) {
-      hourlyData = attrs.dp_hourly_data;
-    }
+    const hourlyData = attrs.hourly_data || {};
 
     // Update Hero Badges
     const socColor = this._getBatteryColor(soc);
@@ -980,7 +925,7 @@ class EnergyManagementDPCard extends HTMLElement {
         const bgColor = hexToRgba(modeColor, 0.1);
         const isManual = hourData.is_manual;
 
-        const displaySoc = (this._activeTab === 'dp' && hourData.soc_limit !== undefined) ? hourData.soc_limit : hourData.soc;
+        const displaySoc = hourData.soc_limit !== undefined ? hourData.soc_limit : hourData.soc;
         const socInfo = getSocInfo(displaySoc);
 
         html += `
@@ -1055,7 +1000,7 @@ class EnergyManagementDPCard extends HTMLElement {
         }
 
         if (socContainer) {
-          const displaySoc = (this._activeTab === 'dp' && hourData.soc_limit !== undefined) ? hourData.soc_limit : hourData.soc;
+          const displaySoc = hourData.soc_limit !== undefined ? hourData.soc_limit : hourData.soc;
           const socInfo = getSocInfo(displaySoc);
           socContainer.style.color = socInfo.color;
           const socIcon = socContainer.querySelector('ha-icon');
