@@ -1,7 +1,7 @@
 DOMAIN = "energy_management_dp"
-VERSION = "v12.7.0"
+VERSION = "v12.8.0"
 
-VERSION_CODE = 1270
+VERSION_CODE = 1280
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
