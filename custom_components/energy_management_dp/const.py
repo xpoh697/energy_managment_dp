@@ -1,7 +1,7 @@
 DOMAIN = "energy_management_dp"
-VERSION = "v12.5.0"
+VERSION = "v12.6.0"
 
-VERSION_CODE = 1250
+VERSION_CODE = 1260
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
@@ -22,7 +22,6 @@ CONF_PRICE_SELL_ONLY_PV = "price_sell_only_pv"
 CONF_BATTERY_MAX_POWER = "battery_max_power"
 CONF_AI_CHARGE_LIMIT = "ai_charge_limit_soc"
 CONF_AI_DISCHARGE_LIMIT = "ai_discharge_limit_soc"
-CONF_MIN_SOC_BAT = "min_soc_bat"
 CONF_DYNAMIC_SOC_BUY = "dynamic_soc_buy"
 CONF_DYNAMIC_SOC_SELL = "dynamic_soc_sell"
 CONF_DEDUCT_SETTINGS = "deduct_settings"

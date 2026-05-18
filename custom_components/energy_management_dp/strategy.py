@@ -10,7 +10,7 @@ from .const import (
     CONF_BATTERY_MAX_POWER,
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
-    CONF_MIN_SOC_BAT,
+    CONF_DP_MIN_SOC,
     CONF_ONLY_SOLAR,
     CONF_PRIORITY,
     INVERTER_MODES,
@@ -172,7 +172,7 @@ class StrategyEngine:
         _, b_cap, _ = man.get_battery_state()
         b_cap = float(b_cap or 10.0)
         eff = float(self.get_efficiency_coefficient() or 0.95)
-        min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+        min_soc = float(man.get_setting(CONF_DP_MIN_SOC, 10.0))
         
         req_soc = target_at_end if target_at_end is not None else min_soc
         
@@ -202,7 +202,7 @@ class StrategyEngine:
 
         man = man or self.manager
         if b_min_soc < 0.01:
-            b_min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+            b_min_soc = float(man.get_setting(CONF_DP_MIN_SOC, 10.0))
 
         _, batt_cap, _ = man.get_battery_state()
         b_cap_f = float(batt_cap)
@@ -620,7 +620,7 @@ class StrategyEngine:
             b_cap_f = float(batt_cap)
             b_energy_f = float(batt_energy_val)
             
-            min_soc_val = man.get_setting(CONF_MIN_SOC_BAT, 10.0)
+            min_soc_val = man.get_setting(CONF_DP_MIN_SOC, 10.0)
             min_soc = float(min_soc_val) if min_soc_val is not None else 10.0
             eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
                         

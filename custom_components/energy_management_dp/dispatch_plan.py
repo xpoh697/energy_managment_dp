@@ -10,7 +10,7 @@ from .utils import normalize_float
 from .const import (
     CONF_BATTERY_MAX_POWER,
     CONF_BATTERY_CAPACITY,
-    CONF_MIN_SOC_BAT,
+    CONF_DP_MIN_SOC,
     CONF_PRICE_STOP_SELL,
     CONF_PRICE_SELL_ONLY_PV,
     CONF_SALE_PV_NO_BAT_MAX_HOUR
@@ -191,11 +191,11 @@ class EnergyLogicEngine:
             is_buying_active = buy_strategy.get("state") == "active"
 
         # 3. Settings & Prices
-        from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_MIN_SOC_BAT, CONF_BATTERY_CAPACITY
+        from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_DP_MIN_SOC, CONF_BATTERY_CAPACITY
         price_stop_sell = float(manager.get_setting(CONF_PRICE_STOP_SELL, 0.0) or 0.0)
         price_sell_only_pv = float(manager.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0) or 999.0)
         sale_pv_no_bat_max_hour = float(manager.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0) or 13.0)
-        min_soc = float(manager.get_setting(CONF_MIN_SOC_BAT, 10.0) or 10.0)
+        min_soc = float(manager.get_setting(CONF_DP_MIN_SOC, 10.0) or 10.0)
         
         cur_price = manager.get_price("sell", today_str, sim_h)
         p_sell_val = float(cur_price) if cur_price is not None else 0.0

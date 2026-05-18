@@ -8,7 +8,6 @@ from .const import (
     CONF_BATTERY_MAX_POWER,
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
-    CONF_MIN_SOC_BAT,
     CONF_AI_DISCHARGE_LIMIT,
     CONF_BOILER_ENABLE,
     CONF_BOILER_POWER,
@@ -110,7 +109,7 @@ class DPPlanner:
             energy_steps = int(round(b_cap / energy_step))
             
             cycle_cost = self._get_deg_cost(b_cap)
-            min_soc = float(normalize_float(self.manager.get_setting(CONF_DP_MIN_SOC, self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))))
+            min_soc = float(normalize_float(self.manager.get_setting(CONF_DP_MIN_SOC, 10.0)))
             eff = getattr(self.manager, "last_eff_coeff", 0.98)  # align with strategy_base.py hardcoded 0.98
             
             # Terminal SOC floor: minimum energy at end of horizon (matches floor_idx in forward induction)
