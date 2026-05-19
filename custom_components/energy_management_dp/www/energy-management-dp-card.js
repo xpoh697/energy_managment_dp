@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v12.1.28 ",
+  "%c ENERGY MANAGEMENT %c v12.1.29 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -121,16 +121,21 @@ class EnergyManagementDPCard extends HTMLElement {
 
     const subscribe = (key, template) => {
       try {
-        const unsub = this._hass.connection.subscribeMessage(
+        // subscribeMessage returns a Promise<unsubscribe_fn>
+        this._hass.connection.subscribeMessage(
           (msg) => {
-            this._templateResults[key] = (msg.result !== undefined ? msg.result : msg).trim ? (msg.result || msg).trim() : (msg.result !== undefined ? msg.result : msg);
+            const raw = msg.result !== undefined ? msg.result : msg;
+            this._templateResults[key] = (typeof raw === 'string') ? raw.trim() : raw;
             if (this._initialized) this._updateUI();
           },
           { type: 'render_template', template }
-        );
-        this._templateUnsubs.push(unsub);
+        ).then(unsub => {
+          this._templateUnsubs.push(unsub);
+        }).catch(e => {
+          console.warn('[EnergyCard] Template subscribe failed for', key, e);
+        });
       } catch(e) {
-        console.warn('[EnergyCard] Template subscribe failed for', key, e);
+        console.warn('[EnergyCard] Template subscribe error for', key, e);
       }
     };
 
@@ -887,12 +892,15 @@ class EnergyManagementDPCard extends HTMLElement {
     if (!container || !this._hass) return;
 
     const extras = this._config.extra_indicators || [];
-    const currentEntityIds = extras.map(item => item.entity);
+    // Build the set of expected data-entity keys (use __tpl_N__ for template items)
+    const expectedKeys = new Set(extras.map((item, i) =>
+      (typeof item.entity === 'string' && item.entity.includes('{{')) ? `__tpl_${i}__` : item.entity
+    ));
 
     // 1. Remove cards that are no longer in config (skipping hardcoded cards like dp-advice-card)
     Array.from(container.querySelectorAll('.stat-card[data-entity]')).forEach(card => {
       if (card.id === 'dp-advice-card') return;
-      if (!currentEntityIds.includes(card.getAttribute('data-entity'))) {
+      if (!expectedKeys.has(card.getAttribute('data-entity'))) {
         card.remove();
       }
     });
