@@ -2100,9 +2100,7 @@ class EnergyProfileManager:
                 if soc_val is not None:
                     soc = float(soc_val)
             except: pass
-            
-            use_dp = self.get_setting("use_dp", False)
-            strategy = "DP" if use_dp else "Heuristic"
+            strategy = "DP"
             
             power = round(slot0.power_ac, 2)
             amps = round(slot0.charge_amps, 1)
