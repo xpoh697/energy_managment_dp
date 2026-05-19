@@ -105,10 +105,6 @@ class DPPlanner:
                 "[DP] Горизонт: %s | Ценовых точек: %d | Цены на завтра: %s",
                 horizon_label, len(available_hours), tomorrow_label
             )
-            self.manager.log_to_file(
-                f"DIAG [DP]: Горизонт={horizon}ч | max_abs_h={max_abs_h} | "
-                f"cur_hour={cur_hour} | Цен всего={len(available_hours)} | Завтра={tomorrow_label}"
-            )
             
             # --- Configuration ---
             max_p_dis = float(normalize_float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)))
