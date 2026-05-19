@@ -2217,6 +2217,26 @@ if override_mode is not None and override_soc is not None:
    - В логике инициализации слайдера модального окна (`currentSocLimit`) сохраняем приоритет `soc_limit`, чтобы отображать лимит оверрайда.
 
 
+## [2026-05-19 10:03] Задача: Добавить в DP Advice аттрибуты точности прогноза генерации и остатка генерации с учётом коэффициента
+
+### Archi
+Задача ясна: добавить в `extra_state_attributes` сенсора `EnergyDPAdviceSensor` два новых атрибута:
+1. **`forecast_accuracy_today`** — точность прогноза генерации сегодня (коэффициент `scale_today = f_today_val / hist_today_rem`). Если 1.0 — прогноз совпадает с историческим профилем, если 1.3 — прогноз на 30% выше среднего.
+2. **`remaining_gen_forecast_kwh`** — остаток генерации сегодня с учётом коэффициента (фактический прогноз Solcast, уже содержащий корректировку на погоду).
+
+Вычисляем эти значения в `async_update_global_plan` (где уже есть `f_today_val`, `hist_today_rem`, `scale_today`) и кешируем в атрибутах менеджера `self._gen_forecast_accuracy` и `self._remaining_gen_kwh`. В `extra_state_attributes` сенсора просто читаем закешированные значения.
+
+### Skeptic
+1. **Деление на ноль**: Расчёт `scale_today = f_today_val / hist_today_rem` при `hist_today_rem == 0.0` (ночное время, нет профиля) приводит к `ZeroDivisionError`. Нужен guard: вычислять только если `hist_today_rem > 0.1`.
+2. **Вычисление в `extra_state_attributes` — дорого**: Если вычислять прямо в property, это будет происходить при каждом запросе HA. Правильно кешировать результат в менеджере в момент обновления плана.
+3. **Защита от `None`**: `get_forecast_value` возвращает `None` если датчик недоступен. Нужна явная защита `or 0.0` при записи в кеш и `round()` в атрибутах, иначе `TypeError`.
+
+### Заключение
+Консенсус достигнут:
+1. В `async_update_global_plan` после вычисления `scale_today` сохраняем `self._gen_forecast_accuracy = round(scale_today, 3)` и `self._remaining_gen_kwh = round(float(f_today_val or 0.0), 2)`.
+2. В `extra_state_attributes` сенсора `EnergyDPAdviceSensor` добавляем два новых ключа, читая из менеджера с безопасными дефолтами.
+
+---
 
 
 

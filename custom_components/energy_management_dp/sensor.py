@@ -1122,6 +1122,10 @@ class EnergyProfileManager:
             hist_today_rem = sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(now_h, 24))
             scale_today = float(f_today_val / hist_today_rem) if (f_today_val is not None and hist_today_rem > 0.1) else 1.0
             
+            # Cache forecast accuracy and remaining generation for DP Advice sensor attributes
+            self._gen_forecast_accuracy = round(scale_today, 3)
+            self._remaining_gen_kwh = round(float(f_today_val or 0.0), 2)
+            
             # Scale tomorrow based on the unique tomorrow generation profile!
             hist_tomorrow = sum(float(normalize_float(prof_gen_tomorrow.get(str(h), 0.0))) for h in range(24))
             scale_tomorrow = float(f_tomorrow_val / hist_tomorrow) if (f_tomorrow_val is not None and hist_tomorrow > 0.1) else 1.0
@@ -4661,6 +4665,8 @@ class EnergyDPAdviceSensor(SensorEntity):
             "profitability_score": self._advice.get("best_value", 0.0),
             "hourly_plan": self._advice.get("formatted_plan", {}),
             "calculation_debug": self._advice.get("debug", {}),
+            "forecast_accuracy_today": getattr(self.manager, "_gen_forecast_accuracy", 1.0),
+            "remaining_gen_forecast_kwh": getattr(self.manager, "_remaining_gen_kwh", 0.0),
             "last_update": dt_util.now().strftime("%H:%M:%S")
         }
 
