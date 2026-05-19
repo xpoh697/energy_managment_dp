@@ -663,7 +663,7 @@ class EnergyManagementDPCard extends HTMLElement {
     // v12.0.38: Explicitly show Forecast vs Target
     const forecastEl = this.shadowRoot.getElementById('info-forecast-soc');
     if (forecastEl) {
-      const displaySoc = hourData.soc_limit !== undefined ? hourData.soc_limit : hourData.soc;
+      const displaySoc = hourData.soc !== undefined ? hourData.soc : hourData.soc_limit;
       forecastEl.innerText = `${displaySoc !== undefined ? displaySoc.toFixed(1) : '--'}%`;
     }
 
@@ -951,7 +951,7 @@ class EnergyManagementDPCard extends HTMLElement {
         const bgColor = hexToRgba(modeColor, 0.1);
         const isManual = hourData.is_manual;
 
-        const displaySoc = hourData.soc_limit !== undefined ? hourData.soc_limit : hourData.soc;
+        const displaySoc = hourData.soc !== undefined ? hourData.soc : hourData.soc_limit;
         const socInfo = getSocInfo(displaySoc);
 
         html += `
@@ -1026,7 +1026,7 @@ class EnergyManagementDPCard extends HTMLElement {
         }
 
         if (socContainer) {
-          const displaySoc = hourData.soc_limit !== undefined ? hourData.soc_limit : hourData.soc;
+          const displaySoc = hourData.soc !== undefined ? hourData.soc : hourData.soc_limit;
           const socInfo = getSocInfo(displaySoc);
           socContainer.style.color = socInfo.color;
           const socIcon = socContainer.querySelector('ha-icon');

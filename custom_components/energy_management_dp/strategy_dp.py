@@ -235,8 +235,6 @@ class DPPlanner:
             curr_si = min(energy_steps, max(0, int(round((curr_s_raw or 0.0) / 100.0 * b_cap / energy_step))))
             full_dp[0][curr_si] = (0.0, -1, ACT_IDLE, 0.0)
             
-            sunrise_h = int(float(self.manager.get_setting("sunrise_h", 8.0)))
-            
             def _update(nsi, act, amt, t_step, si_orig, total_rev):
                 if nsi < 0 or nsi > energy_steps: return
                 
@@ -292,7 +290,10 @@ class DPPlanner:
                 h_override = h_overrides_dict.get(ts_key)
                 if h_override:
                     override_mode = h_override.get("mode")
-                    override_soc = float(h_override.get("soc_limit", 100.0))
+                    try:
+                        override_soc = float(h_override.get("soc_limit", 100.0))
+                    except Exception:
+                        override_soc = 100.0
                 else:
                     now_h_wall = dt_h.hour
                     # Handle both integer and string keys for legacy overrides dict safely
@@ -337,17 +338,70 @@ class DPPlanner:
                     usable_energy = si * energy_step  # DC kWh stored in battery
                     cur_soc_pct = (usable_energy / b_cap) * 100.0 if b_cap > 0 else 0.0
 
-                    # 1. ACT_IDLE: Baseline (Always allowed as fallback)
-                    idle_pv_reward = 0.0 if (p_sell <= min_sell_p and cheap_ahead) else (p_sell * pv_surplus)
-                    _update(si, ACT_IDLE, 0.0, h, si, cur_rev + idle_pv_reward - p_buy * pv_deficit + 1e-6)
-                            
-                    # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
+                    # --- Action Filtering based on manual override ---
+                    is_idle_allowed = True
                     is_dis_allowed = False
-                    if override_mode in ["sale_pv_bat", "dis", "discharge"]:
-                        is_dis_allowed = (cur_soc_pct > override_soc + 0.1)
-                    elif override_mode is None:
+                    is_pv_chg_allowed = True
+                    is_grid_chg_allowed = False
+                    is_sc_allowed = True
+                    is_paid_imp_allowed = True
+
+                    if override_mode is not None:
+                        if override_mode == "buy":
+                            # If target SOC not reached, force charging. Disable idle, self-consume, discharge
+                            if cur_soc_pct < override_soc - 0.1:
+                                is_idle_allowed = False
+                                is_dis_allowed = False
+                                is_pv_chg_allowed = True
+                                is_grid_chg_allowed = True
+                                is_sc_allowed = False
+                                is_paid_imp_allowed = False
+                            else:
+                                is_idle_allowed = True
+                                is_dis_allowed = False
+                                is_pv_chg_allowed = False
+                                is_grid_chg_allowed = False
+                                is_sc_allowed = False
+                                is_paid_imp_allowed = False
+                        elif override_mode in ["sale_pv_bat", "dis", "discharge"]:
+                            # If above target SOC, force discharge to grid. Disable idle, charging, self-consume
+                            if cur_soc_pct > override_soc + 0.1:
+                                is_idle_allowed = False
+                                is_dis_allowed = True
+                                is_pv_chg_allowed = False
+                                is_grid_chg_allowed = False
+                                is_sc_allowed = False
+                                is_paid_imp_allowed = False
+                            else:
+                                is_idle_allowed = True
+                                is_dis_allowed = False
+                                is_pv_chg_allowed = False
+                                is_grid_chg_allowed = False
+                                is_sc_allowed = False
+                                is_paid_imp_allowed = False
+                        elif override_mode in ["sale_pv_no_bat", "no_pv_sale_no_bat", "idle", "stop"]:
+                            # Force idle battery (no charge/discharge)
+                            is_idle_allowed = True
+                            is_dis_allowed = False
+                            is_pv_chg_allowed = False
+                            is_grid_chg_allowed = False
+                            is_sc_allowed = False
+                            is_paid_imp_allowed = False
+                    else:
+                        # Normal mode (no overrides)
+                        is_idle_allowed = True
                         is_dis_allowed = (abs_h in top_sell_set)
-                        
+                        is_pv_chg_allowed = (override_mode not in ["sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
+                        is_grid_chg_allowed = True
+                        is_sc_allowed = (override_mode not in ["buy", "sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
+                        is_paid_imp_allowed = (override_mode not in ["sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
+
+                    # 1. ACT_IDLE: Baseline (Always allowed as fallback)
+                    if is_idle_allowed or (not is_grid_chg_allowed and not is_dis_allowed):
+                        idle_pv_reward = 0.0 if (p_sell <= min_sell_p and cheap_ahead) else (p_sell * pv_surplus)
+                        _update(si, ACT_IDLE, 0.0, h, si, cur_rev + idle_pv_reward - p_buy * pv_deficit + 1e-6)
+                             
+                    # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
                     if is_dis_allowed:
                         exp_dc = min(usable_energy, max_p_dis * duration)
                         if override_mode in ["sale_pv_bat", "dis", "discharge"]:
@@ -363,7 +417,6 @@ class DPPlanner:
                             _update(nsi, ACT_DIS, exp_dc, h, si, cur_rev + reward)  # amt=DC (inverter command)
                             
                     # 3. ACT_PV_CHARGE: Surplus PV (AC) to battery (DC)
-                    is_pv_chg_allowed = (override_mode not in ["sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
                     if is_pv_chg_allowed and pv_surplus > 0.01 and si < energy_steps and not (p_sell <= min_sell_p and cheap_ahead):
                         max_storable_dc = (energy_steps - si) * energy_step
                         chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg * duration)
@@ -375,12 +428,6 @@ class DPPlanner:
                                 _update(si + ci, ACT_PV_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
  
                     # 4. ACT_GRID_CHARGE: Buy from grid (AC) -> store in battery (DC)
-                    is_grid_chg_allowed = False
-                    if override_mode == "buy":
-                        is_grid_chg_allowed = (cur_soc_pct < override_soc - 0.1)
-                    elif override_mode is None:
-                        is_grid_chg_allowed = True
-
                     if is_grid_chg_allowed and si < energy_steps:
                         grid_charge_step = 0.1  # kWh DC granularity
                         max_storable_dc = min(max_p_chg * eff * duration, (energy_steps - si) * energy_step)
@@ -398,7 +445,6 @@ class DPPlanner:
                             _update(si + ci, ACT_GRID_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
  
                     # 5. ACT_SELF_CONSUME: Battery (DC) to home (AC)
-                    is_sc_allowed = (override_mode not in ["buy", "sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
                     if is_sc_allowed and pv_deficit > 0.01 and si > 0:
                         sc_dc = min(usable_energy, pv_deficit / eff, max_p_dis * duration)
                         sc_ac = sc_dc * eff  # AC coverage for home
@@ -409,7 +455,6 @@ class DPPlanner:
                                 _update(si - sci, ACT_SELF_CONSUME, sc_dc, h, si, cur_rev - p_buy * rem_def)  # amt=DC (BMS command)
                             
                     # 6. ACT_PAID_IMPORT: Negative price
-                    is_paid_imp_allowed = (override_mode not in ["sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
                     if is_paid_imp_allowed and p_buy < 0 and cons_interval > 0.01:
                         _update(si, ACT_PAID_IMPORT, 0.0, h, si, cur_rev - p_buy * cons_interval)
 

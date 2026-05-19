@@ -1078,8 +1078,8 @@ class EnergyProfileManager:
             h_abs_sim = now.hour + i
             sim_data = sim_log.get(h_abs_sim, {})
             if sim_data:
-                slot.soc_start = batt_soc if i == 0 else slots[i-1].target_soc
-                slot.soc_end = slot.target_soc
+                slot.soc_start = batt_soc if i == 0 else sim_data.get("soc_start", slot.soc_start)
+                slot.soc_end = sim_data.get("soc_end", slot.soc_end)
                 slot.net_p_bat = sim_data.get("net_p_bat", 0.0)
                 
         return DispatchPlan(slots)
@@ -1168,6 +1168,7 @@ class EnergyProfileManager:
                 self.log_to_file(f"DIAG: Error logging mode: {e_write}")
 
             _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry with dual-planning support.")
+            self._notify_update(force_strategy_recalc=False)
             
         except Exception as e:
             import traceback
