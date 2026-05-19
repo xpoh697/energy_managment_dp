@@ -3439,24 +3439,7 @@ class InverterOperationModeSensor(SensorEntity):
                 
             # Update manager with final mode
             self.manager.current_inverter_mode = self._locked_mode or raw_mode
-
-            # Mirror mapped value if selector entity is configured
-            inverter_select = self.manager.get_setting("inverter_modes_select_entity")
-            if inverter_select and not use_dp:
-                option_val = None
-                if self.manager.current_inverter_mode == "buy":
-                    option_val = self.manager.get_setting("dp_map_charge", "buy")
-                elif self.manager.current_inverter_mode == "sale_pv_bat":
-                    option_val = self.manager.get_setting("dp_map_discharge", "sale_pv_bat")
-                elif self.manager.current_inverter_mode == "sale_pv":
-                    option_val = self.manager.get_setting("dp_map_solar", "sale_pv")
-                elif self.manager.current_inverter_mode == "stop_sale":
-                    option_val = self.manager.get_setting("dp_map_self_consume", "stop_sale")
-                elif self.manager.current_inverter_mode == "no_pv_sale_no_bat":
-                    option_val = self.manager.get_setting("dp_map_grid", "no_pv_sale_no_bat")
-                if option_val:
-                    return option_val
-
+            
             return self.manager.current_inverter_mode
         except Exception as e:
             _LOGGER.error("Error in InverterOperationModeSensor native_value: %s", e)
