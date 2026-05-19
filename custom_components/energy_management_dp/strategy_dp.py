@@ -274,6 +274,26 @@ class DPPlanner:
                 gen = float(normalize_float(f_gen_full.get(str(abs_h), 0.0)))
                 cons = float(normalize_float(f_cons_full.get(str(abs_h), 0.4)))
                 
+                # Resolve active manual override for this hour
+                dt_h = now + timedelta(hours=h)
+                ts_key = dt_h.strftime("%Y-%m-%d %H:00")
+                override_mode = None
+                override_soc = 100.0
+                
+                h_override = self.manager.hourly_manual_overrides.get(ts_key)
+                if h_override:
+                    override_mode = h_override.get("mode")
+                    override_soc = float(h_override.get("soc_limit", 100.0))
+                else:
+                    now_h_wall = dt_h.hour
+                    is_legacy_manual = (dt_h.date() == now.date() and now_h_wall in self.manager.manual_mode_overrides)
+                    if is_legacy_manual:
+                        override_mode = self.manager.manual_mode_overrides.get(now_h_wall)
+                        override_soc = 100.0 if override_mode == "buy" else 10.0
+                
+                if override_mode in ["ai", "ai_mode"]:
+                    override_mode = None
+
                 # v12.1.19: Time-scaling for the first hour to handle late-hour starts accurately
                 duration = 1.0
                 if h == 0:
@@ -304,17 +324,27 @@ class DPPlanner:
                     if cur_rev <= neg_inf + 100: continue
                     
                     usable_energy = si * energy_step  # DC kWh stored in battery
-                    # 1. ACT_IDLE: Baseline
-                    # If cheap_ahead is True, the physical inverter is in no_pv_sale_no_bat, curtailing excess solar (reward = 0.0)
+                    cur_soc_pct = (usable_energy / b_cap) * 100.0 if b_cap > 0 else 0.0
+
+                    # 1. ACT_IDLE: Baseline (Always allowed as fallback)
                     idle_pv_reward = 0.0 if (p_sell <= min_sell_p and cheap_ahead) else (p_sell * pv_surplus)
                     _update(si, ACT_IDLE, 0.0, h, si, cur_rev + idle_pv_reward - p_buy * pv_deficit + 1e-6)
                             
                     # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
-                    # exp_dc = DC energy drawn from battery; exp_ac = AC energy after inverter losses
-                    if abs_h in top_sell_set:
+                    is_dis_allowed = False
+                    if override_mode in ["sale_pv_bat", "dis", "discharge"]:
+                        is_dis_allowed = (cur_soc_pct > override_soc + 0.1)
+                    elif override_mode is None:
+                        is_dis_allowed = (abs_h in top_sell_set)
+                        
+                    if is_dis_allowed:
                         exp_dc = min(usable_energy, max_p_dis * duration)
+                        if override_mode in ["sale_pv_bat", "dis", "discharge"]:
+                            limit_kwh = (override_soc / 100.0) * b_cap
+                            exp_dc = min(exp_dc, max(0.0, usable_energy - limit_kwh))
+                            
                         exp_ac = exp_dc * eff
-                        if exp_dc >= (min_dis_kwh * duration):
+                        if exp_dc >= (min_dis_kwh * duration) or (override_mode is not None and exp_dc > 0.01):
                             to_grid = max(0.0, exp_ac + gen_interval - cons_interval)
                             from_grid = max(0.0, cons_interval - gen_interval - exp_ac)
                             reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp_dc)
@@ -322,9 +352,8 @@ class DPPlanner:
                             _update(nsi, ACT_DIS, exp_dc, h, si, cur_rev + reward)  # amt=DC (inverter command)
                             
                     # 3. ACT_PV_CHARGE: Surplus PV (AC) to battery (DC)
-                    # chg_ac = AC power from PV; chg_dc = DC actually stored (after inverter losses)
-                    # If cheap_ahead is True and p_sell is below the limit, block charging from solar (no_pv_sale_no_bat)
-                    if pv_surplus > 0.01 and si < energy_steps and not (p_sell <= min_sell_p and cheap_ahead):
+                    is_pv_chg_allowed = (override_mode not in ["sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
+                    if is_pv_chg_allowed and pv_surplus > 0.01 and si < energy_steps and not (p_sell <= min_sell_p and cheap_ahead):
                         max_storable_dc = (energy_steps - si) * energy_step
                         chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg * duration)
                         chg_dc = chg_ac * eff
@@ -335,11 +364,19 @@ class DPPlanner:
                                 _update(si + ci, ACT_PV_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
  
                     # 4. ACT_GRID_CHARGE: Buy from grid (AC) -> store in battery (DC)
-                    # Iterate over DC steps (0.5 kWh granularity for performance), pay for AC drawn
-                    # Note: grid_charge_step=0.5 reduces loop from ~66 to ~13 iterations per node
-                    if si < energy_steps:
+                    is_grid_chg_allowed = False
+                    if override_mode == "buy":
+                        is_grid_chg_allowed = (cur_soc_pct < override_soc - 0.1)
+                    elif override_mode is None:
+                        is_grid_chg_allowed = True
+
+                    if is_grid_chg_allowed and si < energy_steps:
                         grid_charge_step = 0.1  # kWh DC granularity
                         max_storable_dc = min(max_p_chg * eff * duration, (energy_steps - si) * energy_step)
+                        if override_mode == "buy":
+                            limit_kwh = (override_soc / 100.0) * b_cap
+                            max_storable_dc = min(max_storable_dc, max(0.0, limit_kwh - usable_energy))
+                            
                         ci_max = max(1, int(max_storable_dc / grid_charge_step))
                         for ci_coarse in range(1, ci_max + 1):
                             chg_dc = ci_coarse * grid_charge_step
@@ -350,8 +387,8 @@ class DPPlanner:
                             _update(si + ci, ACT_GRID_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
  
                     # 5. ACT_SELF_CONSUME: Battery (DC) to home (AC)
-                    # sc_dc = DC drawn from battery; actual AC coverage = sc_dc * eff
-                    if pv_deficit > 0.01 and si > 0:
+                    is_sc_allowed = (override_mode not in ["buy", "sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
+                    if is_sc_allowed and pv_deficit > 0.01 and si > 0:
                         sc_dc = min(usable_energy, pv_deficit / eff, max_p_dis * duration)
                         sc_ac = sc_dc * eff  # AC coverage for home
                         if sc_dc > 0.01:
@@ -360,9 +397,9 @@ class DPPlanner:
                                 rem_def = max(0.0, pv_deficit - sc_ac)
                                 _update(si - sci, ACT_SELF_CONSUME, sc_dc, h, si, cur_rev - p_buy * rem_def)  # amt=DC (BMS command)
                             
-                    # 6. ACT_PAID_IMPORT: Negative price — let house consume from grid,
-                    # keep battery intact to save capacity for an upcoming bigger sell peak.
-                    if p_buy < 0 and cons_interval > 0.01:
+                    # 6. ACT_PAID_IMPORT: Negative price
+                    is_paid_imp_allowed = (override_mode not in ["sale_pv_no_bat", "sale_pv_bat", "dis", "discharge"])
+                    if is_paid_imp_allowed and p_buy < 0 and cons_interval > 0.01:
                         _update(si, ACT_PAID_IMPORT, 0.0, h, si, cur_rev - p_buy * cons_interval)
 
             # --- Backtrack ---
@@ -401,6 +438,23 @@ class DPPlanner:
                 gen = float(normalize_float(f_gen_full.get(str(abs_h), 0.0)))
                 cons = float(normalize_float(f_cons_full.get(str(abs_h), 0.4)))
                 
+                # Resolve active manual override for this hour
+                dt_h = now + timedelta(hours=h_idx)
+                ts_key = dt_h.strftime("%Y-%m-%d %H:00")
+                override_mode = None
+                
+                h_override = self.manager.hourly_manual_overrides.get(ts_key)
+                if h_override:
+                    override_mode = h_override.get("mode")
+                else:
+                    now_h_wall = dt_h.hour
+                    is_legacy_manual = (dt_h.date() == now.date() and now_h_wall in self.manager.manual_mode_overrides)
+                    if is_legacy_manual:
+                        override_mode = self.manager.manual_mode_overrides.get(now_h_wall)
+                
+                if override_mode in ["ai", "ai_mode"]:
+                    override_mode = None
+
                 # Precise discharge power calculation for SELL mode (v12.3.1)
                 duration = 1.0
                 if h_idx == 0:
@@ -455,6 +509,9 @@ class DPPlanner:
                             mode = "no_pv_sale_no_bat"
                         else:
                             mode = "stop_sale"
+
+                if override_mode:
+                    mode = override_mode
 
                 soc = max(0, min(100, int(round((si * energy_step) / b_cap * 100.0))))
                 plan[h_key] = {"mode": mode, "power_kw": round(power_kw, 2), "target_soc": soc}
