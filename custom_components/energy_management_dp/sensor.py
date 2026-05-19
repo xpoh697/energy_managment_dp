@@ -2623,6 +2623,11 @@ class EnergyProfileManager:
             self._last_valid_soc = None
         if not hasattr(self, "_last_valid_cap"):
             self._last_valid_cap = None
+        # Initialize warning throttle timestamps
+        if not hasattr(self, "_last_soc_glitch_warn_time"):
+            self._last_soc_glitch_warn_time = 0.0
+        if not hasattr(self, "_last_cap_glitch_warn_time"):
+            self._last_cap_glitch_warn_time = 0.0
 
         if st:
             try:
@@ -2642,10 +2647,16 @@ class EnergyProfileManager:
             
             # Glitch protection: If we get 0.0 but had a much higher value recently, ignore the 0.0
             if (soc is None or soc <= 0.0) and self._last_valid_soc is not None and self._last_valid_soc > 1.0:
-                _LOGGER.warning(f"Battery SOC glitch detected: {soc}% (last valid: {self._last_valid_soc}%). Using last valid.")
+                t_now = dt_util.utcnow().timestamp()
+                if t_now - self._last_soc_glitch_warn_time > 300:
+                    _LOGGER.warning(f"Battery SOC glitch detected: {soc}% (last valid: {self._last_valid_soc}%). Using last valid.")
+                    self._last_soc_glitch_warn_time = t_now
                 soc = self._last_valid_soc
             
             if soc is not None and soc > 0.0:
+                if self._last_soc_glitch_warn_time > 0:
+                    _LOGGER.info(f"Battery SOC connection restored: {soc}%")
+                    self._last_soc_glitch_warn_time = 0.0
                 self._last_valid_soc = soc
         
         # Final fallback
@@ -2662,7 +2673,10 @@ class EnergyProfileManager:
         # Capacity Glitch Protection
         if cap <= 0.1:
             if self._last_valid_cap is not None:
-                _LOGGER.warning(f"Battery Capacity glitch detected: {cap} kWh. Using last valid: {self._last_valid_cap} kWh")
+                t_now = dt_util.utcnow().timestamp()
+                if t_now - self._last_cap_glitch_warn_time > 300:
+                    _LOGGER.warning(f"Battery Capacity glitch detected: {cap} kWh. Using last valid: {self._last_valid_cap} kWh")
+                    self._last_cap_glitch_warn_time = t_now
                 cap = self._last_valid_cap
             elif "last_known_battery_capacity" in self.data:
                 cap = float(self.data["last_known_battery_capacity"])
@@ -2670,6 +2684,9 @@ class EnergyProfileManager:
                 _LOGGER.warning(f"Battery Capacity sensor is unavailable/0.0. Restored last known from persistent storage: {cap} kWh")
         
         if cap > 0.1:
+            if self._last_cap_glitch_warn_time > 0:
+                _LOGGER.info(f"Battery Capacity connection restored: {cap} kWh")
+                self._last_cap_glitch_warn_time = 0.0
             self._last_valid_cap = cap
             if self.data.get("last_known_battery_capacity") != cap:
                 self.data["last_known_battery_capacity"] = cap
@@ -4632,7 +4649,7 @@ class EnergyDPAdviceSensor(SensorEntity):
 
     @property
     def native_value(self):
-        now_h = f"{datetime.now().hour:02d}:00"
+        now_h = f"{dt_util.now().hour:02d}:00"
         return self._advice.get("plan", {}).get(now_h, {}).get("mode", "Idle")
 
     @property
@@ -4641,7 +4658,7 @@ class EnergyDPAdviceSensor(SensorEntity):
             "profitability_score": self._advice.get("best_value", 0.0),
             "hourly_plan": self._advice.get("formatted_plan", {}),
             "calculation_debug": self._advice.get("debug", {}),
-            "last_update": datetime.now().strftime("%H:%M:%S")
+            "last_update": dt_util.now().strftime("%H:%M:%S")
         }
 
     async def async_added_to_hass(self):
@@ -4724,13 +4741,12 @@ class EnergyDPAdviceSensor(SensorEntity):
 
         # Capture critical data in main thread where it's safe
         soc, cap, _ = self.manager.get_battery_state()
+        current_hour = dt_util.now().hour
 
         # 5. SOC Deadband Filter (Option C): Skip recalculation if SOC change is tiny within the same hour
         # Bypass deadband filter if there is no successful advice yet, or if more than 10 minutes (600s) have passed since last run
         if self._advice and "plan" in self._advice:
             try:
-                from datetime import datetime
-                current_hour = datetime.now().hour
                 if self._last_calc_soc is not None and self._last_calc_hour == current_hour:
                     if abs(t_now - self._last_run_time) < 600:
                         if abs(soc - self._last_calc_soc) < 0.5:
@@ -4742,14 +4758,15 @@ class EnergyDPAdviceSensor(SensorEntity):
             "soc": soc,
             "capacity": cap,
             "prices_buy": self.planner._get_prices("prices_buy"),
-            "prices_sell": self.planner._get_prices("prices_sell")
+            "prices_sell": self.planner._get_prices("prices_sell"),
+            "calc_hour": current_hour
         }
         
         # v12.8.0: Log effective horizon info so user knows what DP is working with
         pb = snapshot["prices_buy"]
         n_points = len(pb)
         has_tomorrow = any(int(h) >= 24 for h in pb.keys()) if pb else False
-        cur_h = datetime.now().hour
+        cur_h = current_hour
         effective_horizon = (max(int(h) for h in pb.keys()) - cur_h + 1) if pb else 0
         _LOGGER.info(
             "[DP Trigger] SOC=%.1f%% | Ценовых точек=%d | Завтрашние цены: %s | Эффективный горизонт: ~%dч",
@@ -4765,6 +4782,12 @@ class EnergyDPAdviceSensor(SensorEntity):
         import copy
         self.manager.dp_advice_stable = copy.deepcopy(self._advice)
         self.async_write_ha_state()
+
+        # Safely update calculation tracking on the main thread (Event Loop)
+        calc_debug = self._advice.get("debug", {})
+        self._last_calc_soc = calc_debug.get("calc_soc")
+        self._last_calc_hour = calc_debug.get("calc_hour", -1)
+
         await self.manager.async_update_global_plan(force_strategy_recalc=False)
 
     def _update_advice_threaded(self, snapshot):
@@ -4772,15 +4795,14 @@ class EnergyDPAdviceSensor(SensorEntity):
         self._is_calculating = True
         try:
             res = self.planner.get_dp_advice(snapshot)
+            # Inject tracking parameters into debug info
+            if "debug" not in res:
+                res["debug"] = {}
+            res["debug"]["calc_soc"] = snapshot.get("soc")
+            res["debug"]["calc_hour"] = snapshot.get("calc_hour")
+
             self._advice = res
             self._last_run_time = time.time()
-            # Store the SOC that was actually computed successfully
-            self._last_calc_soc = snapshot.get("soc")
-            try:
-                from datetime import datetime
-                self._last_calc_hour = datetime.now().hour
-            except:
-                self._last_calc_hour = -1
             if self.hass:
                 self.hass.add_job(self._async_on_calc_complete)
         except Exception as e:
@@ -4788,12 +4810,13 @@ class EnergyDPAdviceSensor(SensorEntity):
             self._advice = {
                 "best_value": 0.0,
                 "formatted_plan": {"Ошибка": f"Сбой расчета DP: {str(e)}"},
-                "debug": {"error": str(e)},
+                "debug": {
+                    "error": str(e),
+                    "calc_soc": None,
+                    "calc_hour": -1
+                },
                 "plan": {}
             }
-            # Reset tracking on failure to force next run
-            self._last_calc_soc = None
-            self._last_calc_hour = -1
             if self.hass:
                 self.hass.add_job(self._async_on_calc_complete)
         finally:
