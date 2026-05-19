@@ -899,28 +899,37 @@ class EnergyManagementDPCard extends HTMLElement {
 
     // 2. Add or Update cards
     extras.forEach((item, i) => {
-      const entityVal = (typeof item.entity === 'string' && item.entity.includes('{{'))
-        ? this._templateResults[`extra_${i}`]
-        : item.entity;
-      if (!entityVal) return;
-      const stateObj = this._hass.states[entityVal];
-      if (!stateObj) return;
+      const isTemplate = typeof item.entity === 'string' && item.entity.includes('{{');
+      const templateResult = this._templateResults[`extra_${i}`];
+      const entityVal = isTemplate ? `__tpl_${i}__` : item.entity;
+
+      // For templates: use result directly as value; for entities: look up in states
+      let newLabel, newVal;
+      if (isTemplate) {
+        if (templateResult === undefined) return; // Still waiting for first result
+        newLabel = item.name || `Template ${i}`;
+        const unit = item.unit || '';
+        newVal = `${templateResult}${unit ? ' ' + unit : ''}`;
+      } else {
+        const stateObj = this._hass.states[entityVal];
+        if (!stateObj) return;
+        newLabel = item.name || stateObj.attributes.friendly_name || 'Sensor';
+        newVal = `${stateObj.state} ${stateObj.attributes.unit_of_measurement || ''}`;
+      }
 
       let card = container.querySelector(`.stat-card[data-entity="${entityVal}"]`);
       if (!card) {
         card = document.createElement('div');
         card.className = 'stat-card';
         card.setAttribute('data-entity', entityVal);
-        card.onclick = () => this._handleMoreInfo(entityVal);
+        // Only attach more-info for real entities
+        if (!isTemplate) card.onclick = () => this._handleMoreInfo(entityVal);
         card.innerHTML = `<span class="stat-label"></span><div class="stat-value"></div>`;
         container.appendChild(card);
       }
 
       const label = card.querySelector('.stat-label');
       const value = card.querySelector('.stat-value');
-
-      const newLabel = item.name || stateObj.attributes.friendly_name || 'Sensor';
-      const newVal = `${stateObj.state} ${stateObj.attributes.unit_of_measurement || ''}`;
 
       if (label.innerText !== newLabel) label.innerText = newLabel;
       if (value.innerText !== newVal) value.innerText = newVal;
