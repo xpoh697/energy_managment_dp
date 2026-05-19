@@ -921,7 +921,8 @@ class EnergyProfileManager:
         plan_by_ts = dp_advice.get("plan_by_timestamp", {}) if isinstance(dp_advice, dict) else {}
         
         v_nom = self.get_sensor_float(self.battery_voltage_sensor) or 52.0
-        b_cap = float(self.get_setting("battery_capacity", 10.0) or 10.0)
+        _, b_cap, _ = self.get_battery_state(soc_default=100.0)
+        b_cap = max(0.1, b_cap)
         max_batt_p = float(self.get_setting("battery_max_power", 3.0) or 3.0)
         
         for h_abs in range(48):
@@ -2528,6 +2529,8 @@ class EnergyProfileManager:
                     pass
 
         if isinstance(default, float):
+            if isinstance(val, str) and any(c.isalpha() for c in val):
+                return default
             try:
                 return float(val)
             except Exception as e:
