@@ -338,6 +338,7 @@ class EnergyProfileManager:
     def __init__(self, hass, entry):
         self.hass = hass
         self.entry = entry
+        self._last_override_change_time = 0.0
 
         config_data = {**entry.data, **entry.options}
 
@@ -1898,6 +1899,7 @@ class EnergyProfileManager:
 
     def _notify_update(self, force_strategy_recalc=False):
         if force_strategy_recalc:
+            self._last_override_change_time = time.time()
             self.strategy_engine.clear_cache()
         for cb in self.update_listeners:
             cb()
@@ -4678,7 +4680,12 @@ class EnergyDPAdviceSensor(SensorEntity):
         t_now = time.time()
         # v11.9.74: Prevent parallel calculations and excessive spam
         if self._is_calculating: return
-        if (t_now - self._last_run_time) < 60: return
+        
+        # Bypass 60s rate limit if overrides/settings changed after the last run, keeping a 2s safety deadband
+        last_change = getattr(self.manager, "_last_override_change_time", 0.0)
+        if (t_now - self._last_run_time) < 60:
+            if last_change <= self._last_run_time or (t_now - self._last_run_time) < 2:
+                return
 
         # 1. Startup Protection: If battery SOC is not yet fully available, skip calculation
         if self.manager.battery_soc_sensor:
