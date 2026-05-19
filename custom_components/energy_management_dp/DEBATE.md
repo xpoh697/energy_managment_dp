@@ -2239,4 +2239,28 @@ if override_mode is not None and override_soc is not None:
 ---
 
 
+## [2026-05-19 10:10] Задача: Поддержка HA Templates в полях конфига карточки (entity, profit_entity, extra_indicators[].entity)
+
+### Archi
+В HA есть WebSocket API `render_template` с поддержкой подписок (сервер сам пушит обновления при изменении любых сущностей в темплейте). Реализую через:
+1. `_resolveConfigValue(key, defaultVal)` — если значение конфига содержит `{{`, возвращает закешированный результат из `this._templateResults[key]`, иначе возвращает значение напрямую как entity_id.
+2. В `set hass` при первой установке: подписываюсь через `hass.connection.subscribeMessage()`. Коллбек обновляет `_templateResults[key]` и вызывает `_updateUI()`.
+3. `disconnectedCallback()` — отписываемся от всех подписок.
+4. При смене конфига (`setConfig`) — очищаем старые подписки и создаём новые.
+
+### Skeptic
+1. **Утечка подписок при повторном `setConfig`**: если пользователь меняет YAML карточки, `setConfig` вызовется снова, но `_hass` может быть уже установлен. Нужно явно чистить все подписки перед повторной инициализацией.
+2. **`extra_indicators[].entity` — массив**: для `entity` и `profit_entity` — просто ключ, для `extra_indicators` — массив объектов с составным ключом `extra_[i]`.
+3. **Первый рендер без результата**: подписка асинхронна. В `_resolveConfigValue` нужен fallback — если темплейт, но результат ещё не получен, вернуть `null`.
+
+### Заключение
+Консенсус достигнут:
+1. В конструктор добавляем `this._templateResults = {}` и `this._templateUnsubs = []`.
+2. `_resolveConfigValue(key, defaultVal)` — проверяет `_templateResults[key]` или возвращает значение конфига как entity_id.
+3. `_subscribeTemplates()` — вызывается из `set hass` при первой установке, подписывается на все темплейтные поля.
+4. `setConfig()` — вызывает `_cleanupTemplates()` если `_hass` уже установлен.
+5. `disconnectedCallback()` — вызывает `_cleanupTemplates()`.
+6. Все `this._config.entity`, `this._config.profit_entity`, `item.entity` в индикаторах переходят на `_resolveConfigValue()`.
+
+---
 

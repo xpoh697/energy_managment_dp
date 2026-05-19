@@ -78,10 +78,16 @@ class EnergyManagementDPCard extends HTMLElement {
   constructor() {
     super();
     this._initialized = false;
+    this._templateResults = {};
+    this._templateUnsubs = [];
   }
 
   set hass(hass) {
+    const firstSet = !this._hass;
     this._hass = hass;
+    if (firstSet && this._config) {
+      this._subscribeTemplates();
+    }
     if (!this._initialized && this.shadowRoot) {
       this._updateContent();
     } else if (this._initialized) {
@@ -90,11 +96,60 @@ class EnergyManagementDPCard extends HTMLElement {
   }
 
   setConfig(config) {
+    if (this._hass) this._cleanupTemplates();
     this._config = config;
     if (!this.shadowRoot) {
       this.attachShadow({ mode: 'open' });
       this._initLayout();
     }
+    if (this._hass) this._subscribeTemplates();
+  }
+
+  disconnectedCallback() {
+    this._cleanupTemplates();
+  }
+
+  _cleanupTemplates() {
+    this._templateUnsubs.forEach(unsub => { try { unsub(); } catch(e) {} });
+    this._templateUnsubs = [];
+    this._templateResults = {};
+  }
+
+  _subscribeTemplates() {
+    if (!this._hass || !this._config) return;
+    const cfg = this._config;
+
+    const subscribe = (key, template) => {
+      try {
+        const unsub = this._hass.connection.subscribeMessage(
+          (msg) => {
+            this._templateResults[key] = (msg.result !== undefined ? msg.result : msg).trim ? (msg.result || msg).trim() : (msg.result !== undefined ? msg.result : msg);
+            if (this._initialized) this._updateUI();
+          },
+          { type: 'render_template', template }
+        );
+        this._templateUnsubs.push(unsub);
+      } catch(e) {
+        console.warn('[EnergyCard] Template subscribe failed for', key, e);
+      }
+    };
+
+    const isTemplate = v => typeof v === 'string' && v.includes('{{');
+
+    if (isTemplate(cfg.entity))        subscribe('entity', cfg.entity);
+    if (isTemplate(cfg.profit_entity)) subscribe('profit_entity', cfg.profit_entity);
+
+    (cfg.extra_indicators || []).forEach((item, i) => {
+      if (isTemplate(item.entity)) subscribe(`extra_${i}`, item.entity);
+    });
+  }
+
+  _resolveConfigValue(key, defaultVal) {
+    const raw = this._config ? this._config[key] : undefined;
+    if (typeof raw === 'string' && raw.includes('{{')) {
+      return this._templateResults[key] !== undefined ? this._templateResults[key] : null;
+    }
+    return raw !== undefined ? raw : defaultVal;
   }
 
   _initLayout() {
@@ -615,7 +670,9 @@ class EnergyManagementDPCard extends HTMLElement {
   }
 
   _openModal(timestamp, currentMode) {
-    const attrs = this._hass.states[this._config.entity].attributes;
+    const _entityId = this._resolveConfigValue('entity', 'sensor.energy_management_dp');
+    if (!_entityId || !this._hass.states[_entityId]) return;
+    const attrs = this._hass.states[_entityId].attributes;
     const data = attrs.hourly_data || {};
     const hourData = data[timestamp] || {};
     const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : (hourData.soc !== undefined ? hourData.soc : 100);
@@ -632,7 +689,7 @@ class EnergyManagementDPCard extends HTMLElement {
     }
 
     // Fill Market Info (v12.0)
-    const currency = this._hass.states[this._config.entity].attributes.unit_of_measurement || '';
+    const currency = (this._hass.states[_entityId] && this._hass.states[_entityId].attributes.unit_of_measurement) || '';
 
     const buyEl = this.shadowRoot.getElementById('info-buy');
     const sellEl = this.shadowRoot.getElementById('info-sell');
@@ -728,7 +785,8 @@ class EnergyManagementDPCard extends HTMLElement {
   }
 
   _updateUI() {
-    const entityId = this._config.entity || 'sensor.energy_management_dp';
+    const entityId = this._resolveConfigValue('entity', 'sensor.energy_management_dp');
+    if (!entityId) return;
     const stateObj = this._hass.states[entityId];
     if (!stateObj) return;
 
@@ -753,7 +811,7 @@ class EnergyManagementDPCard extends HTMLElement {
     }
 
     // Profit Badge
-    const profitEntity = this._config.profit_entity;
+    const profitEntity = this._resolveConfigValue('profit_entity', null);
     const profitHero = this.shadowRoot.getElementById('profit-hero');
     if (profitEntity && this._hass.states[profitEntity]) {
       const pState = this._hass.states[profitEntity];
@@ -840,16 +898,20 @@ class EnergyManagementDPCard extends HTMLElement {
     });
 
     // 2. Add or Update cards
-    extras.forEach(item => {
-      const stateObj = this._hass.states[item.entity];
+    extras.forEach((item, i) => {
+      const entityVal = (typeof item.entity === 'string' && item.entity.includes('{{'))
+        ? this._templateResults[`extra_${i}`]
+        : item.entity;
+      if (!entityVal) return;
+      const stateObj = this._hass.states[entityVal];
       if (!stateObj) return;
 
-      let card = container.querySelector(`.stat-card[data-entity="${item.entity}"]`);
+      let card = container.querySelector(`.stat-card[data-entity="${entityVal}"]`);
       if (!card) {
         card = document.createElement('div');
         card.className = 'stat-card';
-        card.setAttribute('data-entity', item.entity);
-        card.onclick = () => this._handleMoreInfo(item.entity);
+        card.setAttribute('data-entity', entityVal);
+        card.onclick = () => this._handleMoreInfo(entityVal);
         card.innerHTML = `<span class="stat-label"></span><div class="stat-value"></div>`;
         container.appendChild(card);
       }
@@ -872,8 +934,8 @@ class EnergyManagementDPCard extends HTMLElement {
     const container = this.shadowRoot.getElementById('timeline-container');
     if (!container) return;
 
-    const entityId = this._config.entity || 'sensor.energy_management';
-    const stateObj = this._hass.states[entityId];
+    const entityId = this._resolveConfigValue('entity', 'sensor.energy_management_dp');
+    const stateObj = entityId ? this._hass.states[entityId] : null;
     const attrs = (stateObj && stateObj.attributes) ? stateObj.attributes : {};
     const serverToday = attrs.server_today;
 
