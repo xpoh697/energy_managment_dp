@@ -280,15 +280,26 @@ class DPPlanner:
                 override_mode = None
                 override_soc = 100.0
                 
-                h_override = self.manager.hourly_manual_overrides.get(ts_key)
+                # Thread-safe lookup from snapshot copy if available, falling back to manager
+                h_overrides_dict = data_snapshot.get("hourly_manual_overrides") if data_snapshot else None
+                if h_overrides_dict is None:
+                    h_overrides_dict = getattr(self.manager, "hourly_manual_overrides", {})
+                
+                legacy_overrides_dict = data_snapshot.get("manual_mode_overrides") if data_snapshot else None
+                if legacy_overrides_dict is None:
+                    legacy_overrides_dict = getattr(self.manager, "manual_mode_overrides", {})
+
+                h_override = h_overrides_dict.get(ts_key)
                 if h_override:
                     override_mode = h_override.get("mode")
                     override_soc = float(h_override.get("soc_limit", 100.0))
                 else:
                     now_h_wall = dt_h.hour
-                    is_legacy_manual = (dt_h.date() == now.date() and now_h_wall in self.manager.manual_mode_overrides)
+                    # Handle both integer and string keys for legacy overrides dict safely
+                    legacy_val = legacy_overrides_dict.get(now_h_wall) or legacy_overrides_dict.get(str(now_h_wall))
+                    is_legacy_manual = (dt_h.date() == now.date() and legacy_val is not None)
                     if is_legacy_manual:
-                        override_mode = self.manager.manual_mode_overrides.get(now_h_wall)
+                        override_mode = legacy_val
                         override_soc = 100.0 if override_mode == "buy" else 10.0
                 
                 if override_mode in ["ai", "ai_mode"]:
@@ -443,14 +454,25 @@ class DPPlanner:
                 ts_key = dt_h.strftime("%Y-%m-%d %H:00")
                 override_mode = None
                 
-                h_override = self.manager.hourly_manual_overrides.get(ts_key)
+                # Thread-safe lookup from snapshot copy if available, falling back to manager
+                h_overrides_dict = data_snapshot.get("hourly_manual_overrides") if data_snapshot else None
+                if h_overrides_dict is None:
+                    h_overrides_dict = getattr(self.manager, "hourly_manual_overrides", {})
+                
+                legacy_overrides_dict = data_snapshot.get("manual_mode_overrides") if data_snapshot else None
+                if legacy_overrides_dict is None:
+                    legacy_overrides_dict = getattr(self.manager, "manual_mode_overrides", {})
+
+                h_override = h_overrides_dict.get(ts_key)
                 if h_override:
                     override_mode = h_override.get("mode")
                 else:
                     now_h_wall = dt_h.hour
-                    is_legacy_manual = (dt_h.date() == now.date() and now_h_wall in self.manager.manual_mode_overrides)
+                    # Handle both integer and string keys for legacy overrides dict safely
+                    legacy_val = legacy_overrides_dict.get(now_h_wall) or legacy_overrides_dict.get(str(now_h_wall))
+                    is_legacy_manual = (dt_h.date() == now.date() and legacy_val is not None)
                     if is_legacy_manual:
-                        override_mode = self.manager.manual_mode_overrides.get(now_h_wall)
+                        override_mode = legacy_val
                 
                 if override_mode in ["ai", "ai_mode"]:
                     override_mode = None

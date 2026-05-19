@@ -4751,22 +4751,27 @@ class EnergyDPAdviceSensor(SensorEntity):
         current_hour = dt_util.now().hour
 
         # 5. SOC Deadband Filter (Option C): Skip recalculation if SOC change is tiny within the same hour
-        # Bypass deadband filter if there is no successful advice yet, or if more than 10 minutes (600s) have passed since last run
+        # Bypass deadband filter if settings/overrides changed, if there is no successful advice yet,
+        # or if more than 10 minutes (600s) have passed since last run
         if self._advice and "plan" in self._advice:
             try:
-                if self._last_calc_soc is not None and self._last_calc_hour == current_hour:
-                    if abs(t_now - self._last_run_time) < 600:
-                        if abs(soc - self._last_calc_soc) < 0.5:
-                            return
+                if last_change <= self._last_run_time:
+                    if self._last_calc_soc is not None and self._last_calc_hour == current_hour:
+                        if abs(t_now - self._last_run_time) < 600:
+                            if abs(soc - self._last_calc_soc) < 0.5:
+                                return
             except Exception as e_deadband:
                 _LOGGER.warning("DP Advice: Error in deadband check: %s", e_deadband)
 
+        import copy
         snapshot = {
             "soc": soc,
             "capacity": cap,
             "prices_buy": self.planner._get_prices("prices_buy"),
             "prices_sell": self.planner._get_prices("prices_sell"),
-            "calc_hour": current_hour
+            "calc_hour": current_hour,
+            "hourly_manual_overrides": copy.deepcopy(getattr(self.manager, "hourly_manual_overrides", {})),
+            "manual_mode_overrides": copy.deepcopy(getattr(self.manager, "manual_mode_overrides", {}))
         }
         
         # v12.8.0: Log effective horizon info so user knows what DP is working with
