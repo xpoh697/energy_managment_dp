@@ -831,8 +831,9 @@ class EnergyManagementDPCard extends HTMLElement {
     const extras = this._config.extra_indicators || [];
     const currentEntityIds = extras.map(item => item.entity);
 
-    // 1. Remove cards that are no longer in config
+    // 1. Remove cards that are no longer in config (skipping hardcoded cards like dp-advice-card)
     Array.from(container.querySelectorAll('.stat-card[data-entity]')).forEach(card => {
+      if (card.id === 'dp-advice-card') return;
       if (!currentEntityIds.includes(card.getAttribute('data-entity'))) {
         card.remove();
       }
