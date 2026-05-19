@@ -504,9 +504,9 @@ class EnergyManagementDPCard extends HTMLElement {
           </div>
 
           <div class="stats-grid" id="stats-container">
-            <div class="stat-card" onclick="this.getRootNode().host._handleMoreInfo()">
-              <span class="stat-label">Morning Projection</span>
-              <div class="stat-value" id="proj-morning">-</div>
+            <div class="stat-card" id="dp-advice-card" onclick="this.getRootNode().host._handleMoreInfo(this.getAttribute('data-entity'))">
+              <span class="stat-label">Profitability Score</span>
+              <div class="stat-value" id="proj-morning">--</div>
             </div>
             <!-- Extra indicators will be injected here -->
           </div>
@@ -780,7 +780,32 @@ class EnergyManagementDPCard extends HTMLElement {
     if (vTag) vTag.innerText = attrs.strategy_version || 'v12.1.0';
 
     const projM = this.shadowRoot.getElementById('proj-morning');
-    if (projM) projM.innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
+    if (projM) {
+      // Fast path: direct lookup for default entity ID
+      let dpAdviceEntity = 'sensor.energy_dp_advice';
+      let dpAdviceState = this._hass.states[dpAdviceEntity];
+      
+      // Fallback: search keys ending with _dp_advice
+      if (!dpAdviceState) {
+        dpAdviceEntity = Object.keys(this._hass.states).find(key => key.endsWith('_dp_advice'));
+        dpAdviceState = dpAdviceEntity ? this._hass.states[dpAdviceEntity] : null;
+      }
+      
+      const dpCardEl = this.shadowRoot.getElementById('dp-advice-card');
+      if (dpCardEl && dpAdviceEntity) {
+        dpCardEl.setAttribute('data-entity', dpAdviceEntity);
+      }
+
+      if (dpAdviceState && dpAdviceState.attributes && dpAdviceState.attributes.profitability_score !== undefined) {
+        const scoreVal = parseFloat(dpAdviceState.attributes.profitability_score) || 0;
+        const currency = attrs.unit_of_measurement || 'PLN';
+        projM.innerText = scoreVal.toFixed(2) + ' ' + currency;
+        projM.style.color = scoreVal >= 0 ? '#4caf50' : '#f44336';
+      } else {
+        projM.innerText = '--';
+        projM.style.color = 'white';
+      }
+    }
 
     // v11.9.405: Dynamic Extra Indicators from Config
     this._updateExtraIndicators();
